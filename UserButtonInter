@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include "diag/Trace.h"
 #include "cmsis/cmsis_device.h"
-#include <sys/wait.h>
 
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wmissing-declarations"
@@ -12,9 +11,17 @@
 /* Delay count for TIM2 timer: 1/4 sec at 48 MHz */
 #define myTIM2_PERIOD ((uint32_t)12000000)
 
+// <<< DEFINES FOR DEBOUNCE TIMER (TIM3)
+/* Prescaler for a 1kHz timer clock (48MHz / (47999 + 1)) */
+#define myTIM3_PRESCALER ((uint16_t)47999)
+/* 50ms debounce delay (50 * 1ms) */
+#define myTIM3_PERIOD ((uint16_t)50)
+
+
 void myGPIOA_Init(void);
 void myGPIOC_Init(void);
 void myTIM2_Init(void);
+void myTIM3_Init(void); // <<< ADDED: Prototype for debounce timer init
 void myEXTI_Init(void);
 
 /* Global variable indicating which LED is blinking */
@@ -63,12 +70,13 @@ int main(int argc, char* argv[])
 
     myGPIOA_Init();  /* Initialize I/O port PA */
     myGPIOC_Init();  /* Initialize I/O port PC */
-    myTIM2_Init();   /* Initialize timer TIM2 */
+    myTIM2_Init();   /* Initialize timer TIM2 for blinking */
+    myTIM3_Init();   // <<< ADDED: Initialize TIM3 for debouncing
     myEXTI_Init();   /* Initialize EXTI for PA0 */
 
     while (1)
     {
-        /* No polling needed; button handling is done in EXTI0_1_IRQHandler */
+        /* All work is done in interrupts */
     }
 
     return 0;
@@ -132,6 +140,31 @@ void myTIM2_Init()
     TIM2->CR1 |= TIM_CR1_CEN;
 }
 
+// <<< ADDED: New function to initialize the debounce timer TIM3
+void myTIM3_Init()
+{
+    /* Enable clock for TIM3 peripheral */
+    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
+
+    /* Configure TIM3 for one-shot mode for debouncing */
+    TIM3->CR1 = TIM_CR1_OPM; // One-Pulse Mode
+
+    /* Set clock prescaler value */
+    TIM3->PSC = myTIM3_PRESCALER;
+    /* Set auto-reloaded delay */
+    TIM3->ARR = myTIM3_PERIOD;
+
+    /* Enable update interrupt generation */
+    TIM3->DIER |= TIM_DIER_UIE;
+
+    /* Assign TIM3 interrupt priority = 2 (lower than EXTI) in NVIC */
+    NVIC_SetPriority(TIM3_IRQn, 2);
+
+    /* Enable TIM3 interrupts in NVIC */
+    NVIC_EnableIRQ(TIM3_IRQn);
+}
+
+
 void myEXTI_Init()
 {
     /* Map PA0 to EXTI0 */
@@ -141,30 +174,55 @@ void myEXTI_Init()
     /* Enable EXTI0 interrupt */
     EXTI->IMR |= EXTI_IMR_MR0; /* Unmask EXTI0 */
     EXTI->RTSR |= EXTI_RTSR_TR0; /* Trigger on rising edge */
-    //EXTI->FTSR |= EXTI_FTSR_TR0; /* Optional: Trigger on falling edge if needed */
 
     /* Configure NVIC for EXTI0 */
     NVIC_SetPriority(EXTI0_1_IRQn, 1); /* Set priority (lower than TIM2) */
     NVIC_EnableIRQ(EXTI0_1_IRQn); /* Enable EXTI0_1 interrupt */
 }
 
-/* EXTI0 interrupt handler */
+/* EXTI0 interrupt handler - Triggered on initial button press */
+// <<< MODIFIED: This ISR is now much shorter
 void EXTI0_1_IRQHandler(void)
 {
     /* Check if EXTI0 interrupt flag is set */
     if (EXTI->PR & EXTI_PR_PR0)
     {
-    	wait(100);
-        /* Clear the interrupt flag */
+        // <<< 1. Disable this interrupt to prevent bounces
+        EXTI->IMR &= ~EXTI_IMR_MR0;
+
+        // <<< 2. Clear the interrupt flag
         EXTI->PR |= EXTI_PR_PR0;
 
-        /* LED switching logic (same as in original polling code) */
-        GPIOC->BRR = blinkingLED; /* Turn off currently blinking LED */
-        blinkingLED ^= ((uint16_t)0x0300); /* Switch blinking LED */
-        GPIOC->BSRR = blinkingLED; /* Turn on switched LED */
-        trace_printf("\nSwitching the blinking LED...\n");
+        // <<< 3. Start the one-shot debounce timer
+        TIM3->CR1 |= TIM_CR1_CEN;
     }
 }
+
+// <<< ADDED: New ISR for the debounce timer
+/* TIM3 interrupt handler - Triggered after debounce delay */
+void TIM3_IRQHandler(void)
+{
+    // Check if update interrupt flag is set
+    if ((TIM3->SR & TIM_SR_UIF) != 0)
+    {
+        // Clear the interrupt flag
+        TIM3->SR &= ~(TIM_SR_UIF);
+
+        // <<< 4. Verify the button is still pressed after the delay
+        if ((GPIOA->IDR & GPIO_IDR_0) != 0)
+        {
+            // <<< 5. It was a real press! Execute the logic.
+            GPIOC->BRR = blinkingLED; /* Turn off currently blinking LED */
+            blinkingLED ^= ((uint16_t)0x0300); /* Switch blinking LED */
+            GPIOC->BSRR = blinkingLED; /* Turn on switched LED */
+            trace_printf("\nSwitching the blinking LED...\n");
+        }
+
+        // <<< 6. Re-enable the EXTI interrupt for the next press
+        EXTI->IMR |= EXTI_IMR_MR0;
+    }
+}
+
 
 /* TIM2 interrupt handler (unchanged) */
 void TIM2_IRQHandler()
