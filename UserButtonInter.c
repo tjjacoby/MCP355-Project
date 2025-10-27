@@ -12,7 +12,7 @@
 #define myTIM2_PERIOD ((uint32_t)12000000)
 
 // <<< DEFINES FOR DEBOUNCE TIMER (TIM3)
-/* Prescaler for a 1kHz timer clock (48MHz / (47999 + 1)) */
+/* Prescaler for a 1kHz timer clock (48MHz / (47999 + 1)),  1 clock cycle per millisecond*/
 #define myTIM3_PRESCALER ((uint16_t)47999)
 /* 50ms debounce delay (50 * 1ms) */
 #define myTIM3_PERIOD ((uint16_t)50)
@@ -81,23 +81,21 @@ int main(int argc, char* argv[])
 
     return 0;
 }
-
+// User Button
 void myGPIOA_Init()
-{
+{//FROM LAB1 CODE
     /* Enable clock for GPIOA peripheral */
     RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
 
     /* Configure PA0 as input */
     GPIOA->MODER &= ~(GPIO_MODER_MODER0);
 
-    /* Ensure no pull-up/pull-down for PA0 (or use pull-down if needed) */
+    /* Ensure no pull-up/pull-down for PA0 */
     GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR0);
-    /* Optional: Add pull-down to avoid floating input */
-    GPIOA->PUPDR |= GPIO_PUPDR_PUPDR0_1; // Pull-down
 }
-
+// LEDS
 void myGPIOC_Init()
-{
+{//FROM LAB1 CODE
     /* Enable clock for GPIOC peripheral */
     RCC->AHBENR |= RCC_AHBENR_GPIOCEN;
 
@@ -110,9 +108,9 @@ void myGPIOC_Init()
     /* Ensure no pull-up/pull-down for PC8 and PC9 */
     GPIOC->PUPDR &= ~(GPIO_PUPDR_PUPDR8 | GPIO_PUPDR_PUPDR9);
 }
-
+// Blink speed
 void myTIM2_Init()
-{
+{//FROM LAB1 CODE
     /* Enable clock for TIM2 peripheral */
     RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
 
@@ -140,7 +138,7 @@ void myTIM2_Init()
     TIM2->CR1 |= TIM_CR1_CEN;
 }
 
-// <<< ADDED: New function to initialize the debounce timer TIM3
+// initialize the debounce timer using TIM3
 void myTIM3_Init()
 {
     /* Enable clock for TIM3 peripheral */
@@ -172,7 +170,7 @@ void myEXTI_Init()
     SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI0_PA; /* Set PA0 as EXTI0 source */
 
     /* Enable EXTI0 interrupt */
-    EXTI->IMR |= EXTI_IMR_MR0; /* Unmask EXTI0 */
+    EXTI->IMR |= EXTI_IMR_MR0; /* Unmask EXTI0  (enables)*/
     EXTI->RTSR |= EXTI_RTSR_TR0; /* Trigger on rising edge */
 
     /* Configure NVIC for EXTI0 */
@@ -181,24 +179,23 @@ void myEXTI_Init()
 }
 
 /* EXTI0 interrupt handler - Triggered on initial button press */
-// <<< MODIFIED: This ISR is now much shorter
 void EXTI0_1_IRQHandler(void)
 {
     /* Check if EXTI0 interrupt flag is set */
     if (EXTI->PR & EXTI_PR_PR0)
     {
-        // <<< 1. Disable this interrupt to prevent bounces
+        // Disable this interrupt to prevent bounces
         EXTI->IMR &= ~EXTI_IMR_MR0;
 
-        // <<< 2. Clear the interrupt flag
+        //Clear the interrupt flag
         EXTI->PR |= EXTI_PR_PR0;
 
-        // <<< 3. Start the one-shot debounce timer
+        //Start the one-shot debounce timer - code waits for 50 ms delay
         TIM3->CR1 |= TIM_CR1_CEN;
     }
 }
 
-// <<< ADDED: New ISR for the debounce timer
+// ISR for the debounce timer - after the 50 ms delay
 /* TIM3 interrupt handler - Triggered after debounce delay */
 void TIM3_IRQHandler(void)
 {
@@ -208,17 +205,17 @@ void TIM3_IRQHandler(void)
         // Clear the interrupt flag
         TIM3->SR &= ~(TIM_SR_UIF);
 
-        // <<< 4. Verify the button is still pressed after the delay
+        //Verify the button is still pressed after the delay
         if ((GPIOA->IDR & GPIO_IDR_0) != 0)
         {
-            // <<< 5. It was a real press! Execute the logic.
+            // Execute the logic.
             GPIOC->BRR = blinkingLED; /* Turn off currently blinking LED */
             blinkingLED ^= ((uint16_t)0x0300); /* Switch blinking LED */
             GPIOC->BSRR = blinkingLED; /* Turn on switched LED */
             trace_printf("\nSwitching the blinking LED...\n");
         }
 
-        // <<< 6. Re-enable the EXTI interrupt for the next press
+        //Re-enable the EXTI interrupt for the next press
         EXTI->IMR |= EXTI_IMR_MR0;
     }
 }
