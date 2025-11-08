@@ -1,91 +1,19 @@
 //
-// This file is part of the GNU ARM Eclipse distribution.
-// Copyright (c) 2014 Liviu Ionescu.
+// Complete OLED Display Functions for ECE 355 Lab
+// Make sure you have these includes at the top of main.c:
 //
-
-// ----------------------------------------------------------------------------
-
 #include <stdio.h>
 #include "diag/Trace.h"
 #include <string.h>
-
 #include "cmsis/cmsis_device.h"
-
-// ----------------------------------------------------------------------------
-//
-// STM32F0 led blink sample (trace via $(trace)).
-//
-// In debug configurations, demonstrate how to print a greeting message
-// on the trace device. In release configurations the message is
-// simply discarded.
-//
-// To demonstrate POSIX retargetting, reroute the STDOUT and STDERR to the
-// trace device and display messages on both of them.
-//
-// Then demonstrates how to blink a led with 1Hz, using a
-// continuous loop and SysTick delays.
-//
-// On DEBUG, the uptime in seconds is also displayed on the trace device.
-//
-// Trace support is enabled by adding the TRACE macro definition.
-// By default the trace messages are forwarded to the $(trace) output,
-// but can be rerouted to any device or completely suppressed, by
-// changing the definitions required in system/src/diag/trace_impl.c
-// (currently OS_USE_TRACE_ITM, OS_USE_TRACE_SEMIHOSTING_DEBUG/_STDOUT).
-//
-// The external clock frequency is specified as a preprocessor definition
-// passed to the compiler via a command line option (see the 'C/C++ General' ->
-// 'Paths and Symbols' -> the 'Symbols' tab, if you want to change it).
-// The value selected during project creation was HSE_VALUE=48000000.
-//
-/// Note: The default clock settings take the user defined HSE_VALUE and try
-// to reach the maximum possible system clock. For the default 8MHz input
-// the result is guaranteed, but for other values it might not be possible,
-// so please adjust the PLL settings in system/src/cmsis/system_stm32f0xx.c
 //
 
-/**
- * TODO: Before using OLED, setup SPI
- * 1) RCC: Enable PB and SPI
- * 2) PB-> AF0 for PB13/15 (GPIOB -> AFR[1] = 0)
- * 3) SPI2 Enable
- *
- */
-
-// ----- main() ---------------------------------------------------------------
-
-// Sample pragmas to cope with warnings. Please note the related line at
-// the end of this function, used to pop the compiler diagnostics status.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Wmissing-declarations"
-#pragma GCC diagnostic ignored "-Wreturn-type"
-
-
-/*** This is partial code for accessing LED Display via SPI interface. ***/
-
-// There was ... here!
-
-
-unsigned int Freq = 0;  // Example: measured frequency value (global variable)
-unsigned int Res = 0;   // Example: measured resistance value (global variable)
-
-
-void oled_Write(unsigned char);
-void oled_Write_Cmd(unsigned char);
-void oled_Write_Data(unsigned char);
-
-void oled_config(void);
-
-void refresh_OLED(void);
-
-
+// These should be declared as GLOBAL variables (outside any function, before main):
+unsigned int Freq = 0;  // Measured frequency value
+unsigned int Res = 0;   // Measured resistance value
 SPI_HandleTypeDef SPI_Handle;
 
-
-//
 // LED Display initialization commands
-//
 unsigned char oled_init_cmds[] =
 {
     0xAE,
@@ -109,313 +37,262 @@ unsigned char oled_init_cmds[] =
     0xA0
 };
 
-
-//
-// Character specifications for LED Display (1 row = 8 bytes = 1 ASCII character)
-// Example: to display '4', retrieve 8 data bytes stored in Characters[52][X] row
-//          (where X = 0, 1, ..., 7) and send them one by one to LED Display.
-// Row number = character ASCII code (e.g., ASCII code of '4' is 0x34 = 52)
-//
+// Character specifications for LED Display (see document for full array)
+// This is the full Characters array from the lab website
 unsigned char Characters[][8] = {
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // SPACE
-    {0b00000000, 0b00000000, 0b01011111, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // !
-    {0b00000000, 0b00000111, 0b00000000, 0b00000111, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // "
-    {0b00010100, 0b01111111, 0b00010100, 0b01111111, 0b00010100,0b00000000, 0b00000000, 0b00000000},  // #
-    {0b00100100, 0b00101010, 0b01111111, 0b00101010, 0b00010010,0b00000000, 0b00000000, 0b00000000},  // $
-    {0b00100011, 0b00010011, 0b00001000, 0b01100100, 0b01100010,0b00000000, 0b00000000, 0b00000000},  // %
-    {0b00110110, 0b01001001, 0b01010101, 0b00100010, 0b01010000,0b00000000, 0b00000000, 0b00000000},  // &
-    {0b00000000, 0b00000101, 0b00000011, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // '
-    {0b00000000, 0b00011100, 0b00100010, 0b01000001, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // (
-    {0b00000000, 0b01000001, 0b00100010, 0b00011100, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // )
-    {0b00010100, 0b00001000, 0b00111110, 0b00001000, 0b00010100,0b00000000, 0b00000000, 0b00000000},  // *
-    {0b00001000, 0b00001000, 0b00111110, 0b00001000, 0b00001000,0b00000000, 0b00000000, 0b00000000},  // +
-    {0b00000000, 0b01010000, 0b00110000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // ,
-    {0b00001000, 0b00001000, 0b00001000, 0b00001000, 0b00001000,0b00000000, 0b00000000, 0b00000000},  // -
-    {0b00000000, 0b01100000, 0b01100000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // .
-    {0b00100000, 0b00010000, 0b00001000, 0b00000100, 0b00000010,0b00000000, 0b00000000, 0b00000000},  // /
-    {0b00111110, 0b01010001, 0b01001001, 0b01000101, 0b00111110,0b00000000, 0b00000000, 0b00000000},  // 0
-    {0b00000000, 0b01000010, 0b01111111, 0b01000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // 1
-    {0b01000010, 0b01100001, 0b01010001, 0b01001001, 0b01000110,0b00000000, 0b00000000, 0b00000000},  // 2
-    {0b00100001, 0b01000001, 0b01000101, 0b01001011, 0b00110001,0b00000000, 0b00000000, 0b00000000},  // 3
-    {0b00011000, 0b00010100, 0b00010010, 0b01111111, 0b00010000,0b00000000, 0b00000000, 0b00000000},  // 4
-    {0b00100111, 0b01000101, 0b01000101, 0b01000101, 0b00111001,0b00000000, 0b00000000, 0b00000000},  // 5
-    {0b00111100, 0b01001010, 0b01001001, 0b01001001, 0b00110000,0b00000000, 0b00000000, 0b00000000},  // 6
-    {0b00000011, 0b00000001, 0b01110001, 0b00001001, 0b00000111,0b00000000, 0b00000000, 0b00000000},  // 7
-    {0b00110110, 0b01001001, 0b01001001, 0b01001001, 0b00110110,0b00000000, 0b00000000, 0b00000000},  // 8
-    {0b00000110, 0b01001001, 0b01001001, 0b00101001, 0b00011110,0b00000000, 0b00000000, 0b00000000},  // 9
-    {0b00000000, 0b00110110, 0b00110110, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // :
-    {0b00000000, 0b01010110, 0b00110110, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // ;
-    {0b00001000, 0b00010100, 0b00100010, 0b01000001, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // <
-    {0b00010100, 0b00010100, 0b00010100, 0b00010100, 0b00010100,0b00000000, 0b00000000, 0b00000000},  // =
-    {0b00000000, 0b01000001, 0b00100010, 0b00010100, 0b00001000,0b00000000, 0b00000000, 0b00000000},  // >
-    {0b00000010, 0b00000001, 0b01010001, 0b00001001, 0b00000110,0b00000000, 0b00000000, 0b00000000},  // ?
-    {0b00110010, 0b01001001, 0b01111001, 0b01000001, 0b00111110,0b00000000, 0b00000000, 0b00000000},  // @
-    {0b01111110, 0b00010001, 0b00010001, 0b00010001, 0b01111110,0b00000000, 0b00000000, 0b00000000},  // A
-    {0b01111111, 0b01001001, 0b01001001, 0b01001001, 0b00110110,0b00000000, 0b00000000, 0b00000000},  // B
-    {0b00111110, 0b01000001, 0b01000001, 0b01000001, 0b00100010,0b00000000, 0b00000000, 0b00000000},  // C
-    {0b01111111, 0b01000001, 0b01000001, 0b00100010, 0b00011100,0b00000000, 0b00000000, 0b00000000},  // D
-    {0b01111111, 0b01001001, 0b01001001, 0b01001001, 0b01000001,0b00000000, 0b00000000, 0b00000000},  // E
-    {0b01111111, 0b00001001, 0b00001001, 0b00001001, 0b00000001,0b00000000, 0b00000000, 0b00000000},  // F
-    {0b00111110, 0b01000001, 0b01001001, 0b01001001, 0b01111010,0b00000000, 0b00000000, 0b00000000},  // G
-    {0b01111111, 0b00001000, 0b00001000, 0b00001000, 0b01111111,0b00000000, 0b00000000, 0b00000000},  // H
-    {0b01000000, 0b01000001, 0b01111111, 0b01000001, 0b01000000,0b00000000, 0b00000000, 0b00000000},  // I
-    {0b00100000, 0b01000000, 0b01000001, 0b00111111, 0b00000001,0b00000000, 0b00000000, 0b00000000},  // J
-    {0b01111111, 0b00001000, 0b00010100, 0b00100010, 0b01000001,0b00000000, 0b00000000, 0b00000000},  // K
-    {0b01111111, 0b01000000, 0b01000000, 0b01000000, 0b01000000,0b00000000, 0b00000000, 0b00000000},  // L
-    {0b01111111, 0b00000010, 0b00001100, 0b00000010, 0b01111111,0b00000000, 0b00000000, 0b00000000},  // M
-    {0b01111111, 0b00000100, 0b00001000, 0b00010000, 0b01111111,0b00000000, 0b00000000, 0b00000000},  // N
-    {0b00111110, 0b01000001, 0b01000001, 0b01000001, 0b00111110,0b00000000, 0b00000000, 0b00000000},  // O
-    {0b01111111, 0b00001001, 0b00001001, 0b00001001, 0b00000110,0b00000000, 0b00000000, 0b00000000},  // P
-    {0b00111110, 0b01000001, 0b01010001, 0b00100001, 0b01011110,0b00000000, 0b00000000, 0b00000000},  // Q
-    {0b01111111, 0b00001001, 0b00011001, 0b00101001, 0b01000110,0b00000000, 0b00000000, 0b00000000},  // R
-    {0b01000110, 0b01001001, 0b01001001, 0b01001001, 0b00110001,0b00000000, 0b00000000, 0b00000000},  // S
-    {0b00000001, 0b00000001, 0b01111111, 0b00000001, 0b00000001,0b00000000, 0b00000000, 0b00000000},  // T
-    {0b00111111, 0b01000000, 0b01000000, 0b01000000, 0b00111111,0b00000000, 0b00000000, 0b00000000},  // U
-    {0b00011111, 0b00100000, 0b01000000, 0b00100000, 0b00011111,0b00000000, 0b00000000, 0b00000000},  // V
-    {0b00111111, 0b01000000, 0b00111000, 0b01000000, 0b00111111,0b00000000, 0b00000000, 0b00000000},  // W
-    {0b01100011, 0b00010100, 0b00001000, 0b00010100, 0b01100011,0b00000000, 0b00000000, 0b00000000},  // X
-    {0b00000111, 0b00001000, 0b01110000, 0b00001000, 0b00000111,0b00000000, 0b00000000, 0b00000000},  // Y
-    {0b01100001, 0b01010001, 0b01001001, 0b01000101, 0b01000011,0b00000000, 0b00000000, 0b00000000},  // Z
-    {0b01111111, 0b01000001, 0b00000000, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // [
-    {0b00010101, 0b00010110, 0b01111100, 0b00010110, 0b00010101,0b00000000, 0b00000000, 0b00000000},  // back slash
-    {0b00000000, 0b00000000, 0b00000000, 0b01000001, 0b01111111,0b00000000, 0b00000000, 0b00000000},  // ]
-    {0b00000100, 0b00000010, 0b00000001, 0b00000010, 0b00000100,0b00000000, 0b00000000, 0b00000000},  // ^
-    {0b01000000, 0b01000000, 0b01000000, 0b01000000, 0b01000000,0b00000000, 0b00000000, 0b00000000},  // _
-    {0b00000000, 0b00000001, 0b00000010, 0b00000100, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // `
-    {0b00100000, 0b01010100, 0b01010100, 0b01010100, 0b01111000,0b00000000, 0b00000000, 0b00000000},  // a
-    {0b01111111, 0b01001000, 0b01000100, 0b01000100, 0b00111000,0b00000000, 0b00000000, 0b00000000},  // b
-    {0b00111000, 0b01000100, 0b01000100, 0b01000100, 0b00100000,0b00000000, 0b00000000, 0b00000000},  // c
-    {0b00111000, 0b01000100, 0b01000100, 0b01001000, 0b01111111,0b00000000, 0b00000000, 0b00000000},  // d
-    {0b00111000, 0b01010100, 0b01010100, 0b01010100, 0b00011000,0b00000000, 0b00000000, 0b00000000},  // e
-    {0b00001000, 0b01111110, 0b00001001, 0b00000001, 0b00000010,0b00000000, 0b00000000, 0b00000000},  // f
-    {0b00001100, 0b01010010, 0b01010010, 0b01010010, 0b00111110,0b00000000, 0b00000000, 0b00000000},  // g
-    {0b01111111, 0b00001000, 0b00000100, 0b00000100, 0b01111000,0b00000000, 0b00000000, 0b00000000},  // h
-    {0b00000000, 0b01000100, 0b01111101, 0b01000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // i
-    {0b00100000, 0b01000000, 0b01000100, 0b00111101, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // j
-    {0b01111111, 0b00010000, 0b00101000, 0b01000100, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // k
-    {0b00000000, 0b01000001, 0b01111111, 0b01000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // l
-    {0b01111100, 0b00000100, 0b00011000, 0b00000100, 0b01111000,0b00000000, 0b00000000, 0b00000000},  // m
-    {0b01111100, 0b00001000, 0b00000100, 0b00000100, 0b01111000,0b00000000, 0b00000000, 0b00000000},  // n
-    {0b00111000, 0b01000100, 0b01000100, 0b01000100, 0b00111000,0b00000000, 0b00000000, 0b00000000},  // o
-    {0b01111100, 0b00010100, 0b00010100, 0b00010100, 0b00001000,0b00000000, 0b00000000, 0b00000000},  // p
-    {0b00001000, 0b00010100, 0b00010100, 0b00011000, 0b01111100,0b00000000, 0b00000000, 0b00000000},  // q
-    {0b01111100, 0b00001000, 0b00000100, 0b00000100, 0b00001000,0b00000000, 0b00000000, 0b00000000},  // r
-    {0b01001000, 0b01010100, 0b01010100, 0b01010100, 0b00100000,0b00000000, 0b00000000, 0b00000000},  // s
-    {0b00000100, 0b00111111, 0b01000100, 0b01000000, 0b00100000,0b00000000, 0b00000000, 0b00000000},  // t
-    {0b00111100, 0b01000000, 0b01000000, 0b00100000, 0b01111100,0b00000000, 0b00000000, 0b00000000},  // u
-    {0b00011100, 0b00100000, 0b01000000, 0b00100000, 0b00011100,0b00000000, 0b00000000, 0b00000000},  // v
-    {0b00111100, 0b01000000, 0b00111000, 0b01000000, 0b00111100,0b00000000, 0b00000000, 0b00000000},  // w
-    {0b01000100, 0b00101000, 0b00010000, 0b00101000, 0b01000100,0b00000000, 0b00000000, 0b00000000},  // x
-    {0b00001100, 0b01010000, 0b01010000, 0b01010000, 0b00111100,0b00000000, 0b00000000, 0b00000000},  // y
-    {0b01000100, 0b01100100, 0b01010100, 0b01001100, 0b01000100,0b00000000, 0b00000000, 0b00000000},  // z
-    {0b00000000, 0b00001000, 0b00110110, 0b01000001, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // {
-    {0b00000000, 0b00000000, 0b01111111, 0b00000000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // |
-    {0b00000000, 0b01000001, 0b00110110, 0b00001000, 0b00000000,0b00000000, 0b00000000, 0b00000000},  // }
-    {0b00001000, 0b00001000, 0b00101010, 0b00011100, 0b00001000,0b00000000, 0b00000000, 0b00000000},  // ~
-    {0b00001000, 0b00011100, 0b00101010, 0b00001000, 0b00001000,0b00000000, 0b00000000, 0b00000000}   // <-
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},  // SPACE (indices 0-31)
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},  // SPACE (32)
+    {0x00, 0x00, 0x5F, 0x00, 0x00, 0x00, 0x00, 0x00},  // ! (33)
+    {0x00, 0x07, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00},  // " (34)
+    {0x14, 0x7F, 0x14, 0x7F, 0x14, 0x00, 0x00, 0x00},  // # (35)
+    {0x24, 0x2A, 0x7F, 0x2A, 0x12, 0x00, 0x00, 0x00},  // $ (36)
+    {0x23, 0x13, 0x08, 0x64, 0x62, 0x00, 0x00, 0x00},  // % (37)
+    {0x36, 0x49, 0x55, 0x22, 0x50, 0x00, 0x00, 0x00},  // & (38)
+    {0x00, 0x05, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00},  // ' (39)
+    {0x00, 0x1C, 0x22, 0x41, 0x00, 0x00, 0x00, 0x00},  // ( (40)
+    {0x00, 0x41, 0x22, 0x1C, 0x00, 0x00, 0x00, 0x00},  // ) (41)
+    {0x14, 0x08, 0x3E, 0x08, 0x14, 0x00, 0x00, 0x00},  // * (42)
+    {0x08, 0x08, 0x3E, 0x08, 0x08, 0x00, 0x00, 0x00},  // + (43)
+    {0x00, 0x50, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00},  // , (44)
+    {0x08, 0x08, 0x08, 0x08, 0x08, 0x00, 0x00, 0x00},  // - (45)
+    {0x00, 0x60, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00},  // . (46)
+    {0x20, 0x10, 0x08, 0x04, 0x02, 0x00, 0x00, 0x00},  // / (47)
+    {0x3E, 0x51, 0x49, 0x45, 0x3E, 0x00, 0x00, 0x00},  // 0 (48)
+    {0x00, 0x42, 0x7F, 0x40, 0x00, 0x00, 0x00, 0x00},  // 1 (49)
+    {0x42, 0x61, 0x51, 0x49, 0x46, 0x00, 0x00, 0x00},  // 2 (50)
+    {0x21, 0x41, 0x45, 0x4B, 0x31, 0x00, 0x00, 0x00},  // 3 (51)
+    {0x18, 0x14, 0x12, 0x7F, 0x10, 0x00, 0x00, 0x00},  // 4 (52)
+    {0x27, 0x45, 0x45, 0x45, 0x39, 0x00, 0x00, 0x00},  // 5 (53)
+    {0x3C, 0x4A, 0x49, 0x49, 0x30, 0x00, 0x00, 0x00},  // 6 (54)
+    {0x03, 0x01, 0x71, 0x09, 0x07, 0x00, 0x00, 0x00},  // 7 (55)
+    {0x36, 0x49, 0x49, 0x49, 0x36, 0x00, 0x00, 0x00},  // 8 (56)
+    {0x06, 0x49, 0x49, 0x29, 0x1E, 0x00, 0x00, 0x00},  // 9 (57)
+    {0x00, 0x36, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00},  // : (58)
+    {0x00, 0x56, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00},  // ; (59)
+    {0x08, 0x14, 0x22, 0x41, 0x00, 0x00, 0x00, 0x00},  // < (60)
+    {0x14, 0x14, 0x14, 0x14, 0x14, 0x00, 0x00, 0x00},  // = (61)
+    {0x00, 0x41, 0x22, 0x14, 0x08, 0x00, 0x00, 0x00},  // > (62)
+    {0x02, 0x01, 0x51, 0x09, 0x06, 0x00, 0x00, 0x00},  // ? (63)
+    {0x32, 0x49, 0x79, 0x41, 0x3E, 0x00, 0x00, 0x00},  // @ (64)
+    {0x7E, 0x11, 0x11, 0x11, 0x7E, 0x00, 0x00, 0x00},  // A (65)
+    {0x7F, 0x49, 0x49, 0x49, 0x36, 0x00, 0x00, 0x00},  // B (66)
+    {0x3E, 0x41, 0x41, 0x41, 0x22, 0x00, 0x00, 0x00},  // C (67)
+    {0x7F, 0x41, 0x41, 0x22, 0x1C, 0x00, 0x00, 0x00},  // D (68)
+    {0x7F, 0x49, 0x49, 0x49, 0x41, 0x00, 0x00, 0x00},  // E (69)
+    {0x7F, 0x09, 0x09, 0x09, 0x01, 0x00, 0x00, 0x00},  // F (70)
+    {0x3E, 0x41, 0x49, 0x49, 0x7A, 0x00, 0x00, 0x00},  // G (71)
+    {0x7F, 0x08, 0x08, 0x08, 0x7F, 0x00, 0x00, 0x00},  // H (72)
+    {0x40, 0x41, 0x7F, 0x41, 0x40, 0x00, 0x00, 0x00},  // I (73)
+    {0x20, 0x40, 0x41, 0x3F, 0x01, 0x00, 0x00, 0x00},  // J (74)
+    {0x7F, 0x08, 0x14, 0x22, 0x41, 0x00, 0x00, 0x00},  // K (75)
+    {0x7F, 0x40, 0x40, 0x40, 0x40, 0x00, 0x00, 0x00},  // L (76)
+    {0x7F, 0x02, 0x0C, 0x02, 0x7F, 0x00, 0x00, 0x00},  // M (77)
+    {0x7F, 0x04, 0x08, 0x10, 0x7F, 0x00, 0x00, 0x00},  // N (78)
+    {0x3E, 0x41, 0x41, 0x41, 0x3E, 0x00, 0x00, 0x00},  // O (79)
+    {0x7F, 0x09, 0x09, 0x09, 0x06, 0x00, 0x00, 0x00},  // P (80)
+    {0x3E, 0x41, 0x51, 0x21, 0x5E, 0x00, 0x00, 0x00},  // Q (81)
+    {0x7F, 0x09, 0x19, 0x29, 0x46, 0x00, 0x00, 0x00},  // R (82)
+    {0x46, 0x49, 0x49, 0x49, 0x31, 0x00, 0x00, 0x00},  // S (83)
+    {0x01, 0x01, 0x7F, 0x01, 0x01, 0x00, 0x00, 0x00},  // T (84)
+    {0x3F, 0x40, 0x40, 0x40, 0x3F, 0x00, 0x00, 0x00},  // U (85)
+    {0x1F, 0x20, 0x40, 0x20, 0x1F, 0x00, 0x00, 0x00},  // V (86)
+    {0x3F, 0x40, 0x38, 0x40, 0x3F, 0x00, 0x00, 0x00},  // W (87)
+    {0x63, 0x14, 0x08, 0x14, 0x63, 0x00, 0x00, 0x00},  // X (88)
+    {0x07, 0x08, 0x70, 0x08, 0x07, 0x00, 0x00, 0x00},  // Y (89)
+    {0x61, 0x51, 0x49, 0x45, 0x43, 0x00, 0x00, 0x00},  // Z (90)
+    {0x7F, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},  // [ (91)
+    {0x15, 0x16, 0x7C, 0x16, 0x15, 0x00, 0x00, 0x00},  // backslash (92)
+    {0x00, 0x00, 0x00, 0x41, 0x7F, 0x00, 0x00, 0x00},  // ] (93)
+    {0x04, 0x02, 0x01, 0x02, 0x04, 0x00, 0x00, 0x00},  // ^ (94)
+    {0x40, 0x40, 0x40, 0x40, 0x40, 0x00, 0x00, 0x00},  // _ (95)
+    {0x00, 0x01, 0x02, 0x04, 0x00, 0x00, 0x00, 0x00},  // ` (96)
+    {0x20, 0x54, 0x54, 0x54, 0x78, 0x00, 0x00, 0x00},  // a (97)
+    {0x7F, 0x48, 0x44, 0x44, 0x38, 0x00, 0x00, 0x00},  // b (98)
+    {0x38, 0x44, 0x44, 0x44, 0x20, 0x00, 0x00, 0x00},  // c (99)
+    {0x38, 0x44, 0x44, 0x48, 0x7F, 0x00, 0x00, 0x00},  // d (100)
+    {0x38, 0x54, 0x54, 0x54, 0x18, 0x00, 0x00, 0x00},  // e (101)
+    {0x08, 0x7E, 0x09, 0x01, 0x02, 0x00, 0x00, 0x00},  // f (102)
+    {0x0C, 0x52, 0x52, 0x52, 0x3E, 0x00, 0x00, 0x00},  // g (103)
+    {0x7F, 0x08, 0x04, 0x04, 0x78, 0x00, 0x00, 0x00},  // h (104)
+    {0x00, 0x44, 0x7D, 0x40, 0x00, 0x00, 0x00, 0x00},  // i (105)
+    {0x20, 0x40, 0x44, 0x3D, 0x00, 0x00, 0x00, 0x00},  // j (106)
+    {0x7F, 0x10, 0x28, 0x44, 0x00, 0x00, 0x00, 0x00},  // k (107)
+    {0x00, 0x41, 0x7F, 0x40, 0x00, 0x00, 0x00, 0x00},  // l (108)
+    {0x7C, 0x04, 0x18, 0x04, 0x78, 0x00, 0x00, 0x00},  // m (109)
+    {0x7C, 0x08, 0x04, 0x04, 0x78, 0x00, 0x00, 0x00},  // n (110)
+    {0x38, 0x44, 0x44, 0x44, 0x38, 0x00, 0x00, 0x00},  // o (111)
+    {0x7C, 0x14, 0x14, 0x14, 0x08, 0x00, 0x00, 0x00},  // p (112)
+    {0x08, 0x14, 0x14, 0x18, 0x7C, 0x00, 0x00, 0x00},  // q (113)
+    {0x7C, 0x08, 0x04, 0x04, 0x08, 0x00, 0x00, 0x00},  // r (114)
+    {0x48, 0x54, 0x54, 0x54, 0x20, 0x00, 0x00, 0x00},  // s (115)
+    {0x04, 0x3F, 0x44, 0x40, 0x20, 0x00, 0x00, 0x00},  // t (116)
+    {0x3C, 0x40, 0x40, 0x20, 0x7C, 0x00, 0x00, 0x00},  // u (117)
+    {0x1C, 0x20, 0x40, 0x20, 0x1C, 0x00, 0x00, 0x00},  // v (118)
+    {0x3C, 0x40, 0x38, 0x40, 0x3C, 0x00, 0x00, 0x00},  // w (119)
+    {0x44, 0x28, 0x10, 0x28, 0x44, 0x00, 0x00, 0x00},  // x (120)
+    {0x0C, 0x50, 0x50, 0x50, 0x3C, 0x00, 0x00, 0x00},  // y (121)
+    {0x44, 0x64, 0x54, 0x4C, 0x44, 0x00, 0x00, 0x00},  // z (122)
+    {0x00, 0x08, 0x36, 0x41, 0x00, 0x00, 0x00, 0x00},  // { (123)
+    {0x00, 0x00, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00},  // | (124)
+    {0x00, 0x41, 0x36, 0x08, 0x00, 0x00, 0x00, 0x00},  // } (125)
+    {0x08, 0x08, 0x2A, 0x1C, 0x08, 0x00, 0x00, 0x00},  // ~ (126)
+    {0x08, 0x1C, 0x2A, 0x08, 0x08, 0x00, 0x00, 0x00}   // <- (127)
 };
 
+// Function prototypes (add these near the top, after includes):
+void oled_Write(unsigned char Value);
+void oled_Write_Cmd(unsigned char cmd);
+void oled_Write_Data(unsigned char data);
+void oled_config(void);
+void refresh_OLED(char * text);
 
 
-void SystemClock48MHz( void )
+// ============= FUNCTION IMPLEMENTATIONS =============
+
+void refresh_OLED(char * text)
 {
-//
-// Disable the PLL
-//
-    RCC->CR &= ~(RCC_CR_PLLON);
-//
-// Wait for the PLL to unlock
-//
-    while (( RCC->CR & RCC_CR_PLLRDY ) != 0 );
-//
-// Configure the PLL for a 48MHz system clock
-//
-    RCC->CFGR = 0x00280000;
+    // Buffer size = at most 16 characters per PAGE + terminating '\0'
+    char Buffer[17];  // Changed to char instead of unsigned char
 
-//
-// Enable the PLL
-//
-    RCC->CR |= RCC_CR_PLLON;
+    // Display resistance on PAGE 2
+    //snprintf(Buffer, sizeof(Buffer), "R: %5u Ohms", Res);
+    snprintf(Buffer, sizeof(Buffer), "%s", text);
 
-//
-// Wait for the PLL to lock
-//
-    while (( RCC->CR & RCC_CR_PLLRDY ) != RCC_CR_PLLRDY );
+    // Select PAGE 2, set starting SEG to 2
+    oled_Write_Cmd(0xB2);  // Select PAGE 2 (1011 0010)
+    oled_Write_Cmd(0x02);  // Set lower column address (SEG lower nibble = 0010)
+    oled_Write_Cmd(0x10);  // Set upper column address (SEG upper nibble = 0000)
 
-//
-// Switch the processor to the PLL clock source
-//
-    RCC->CFGR = ( RCC->CFGR & (~RCC_CFGR_SW_Msk)) | RCC_CFGR_SW_PLL;
-
-//
-// Update the system with the new clock frequency
-//
-    SystemCoreClockUpdate();
-
-}
-
-
-
-int
-main(int argc, char* argv[])
-{
-
-	SystemClock48MHz();
-
-
-
-	oled_config();
-
-	while (1)
-	{
-
-	// ...
-
-		refresh_OLED();
-
-	}
-
-}
-
-
-
-//
-// LED Display Functions
-//
-
-
-void refresh_OLED( void )
-{unsigned char Buffer[17];
-snprintf((char*)Buffer, sizeof(Buffer), "R: %5u Ohms", Res);
-
-oled_Write_Cmd(0xB0 + 0); // PAGE 0
-oled_Write_Cmd(0x00);
-oled_Write_Cmd(0x10);
-for (int i = 0; i < strlen((char*)Buffer); i++) {
-    unsigned char c = Buffer[i];
-    for (int j = 0; j < 8; j++) {
-        oled_Write_Data(Characters[c][j]);
+    // Send each character to display
+    for (int i = 0; Buffer[i] != '\0'; i++)
+    {
+        unsigned char c = Buffer[i];
+        for (int j = 0; j < 8; j++)
+        {
+            oled_Write_Data(Characters[c][j]);
+        }
     }
-}
 
-snprintf((char*)Buffer, sizeof(Buffer), "F: %5u Hz", Freq);
-oled_Write_Cmd(0xB0 + 2); // PAGE 2
-oled_Write_Cmd(0x00);
-oled_Write_Cmd(0x10);
-for (int i = 0; i < strlen((char*)Buffer); i++) {
-    unsigned char c = Buffer[i];
-    for (int j = 0; j < 8; j++) {
-        oled_Write_Data(Characters[c][j]);
+    // Display frequency on PAGE 4
+    //snprintf(Buffer, sizeof(Buffer), "F: %5u Hz", Freq);
+    snprintf(Buffer, sizeof(Buffer), "%s", text);
+
+    // Select PAGE 4, set starting SEG to 2
+    oled_Write_Cmd(0xB6);  // Select PAGE 4 (1011 0100)
+    oled_Write_Cmd(0x04);  // Set lower column address
+    oled_Write_Cmd(0x12);  // Set upper column address
+
+    // Send each character to display
+    for (int i = 0; Buffer[i] != '\0'; i++)
+    {
+        unsigned char c = Buffer[i];
+        for (int j = 0; j < 8; j++)
+        {
+            oled_Write_Data(Characters[c][j]);
+        }
     }
+
+    // Wait for ~100 ms using TIM3 for ~10 frames/sec refresh rate
+    // Note: You need to configure TIM3 first in your main() or init code
+    // Assuming TIM3 is configured with a suitable prescaler
+    // Adjust the count value based on your actual TIM3 clock configuration
+    TIM3->CNT = 0;
+    while (TIM3->CNT < 4800);  // Adjust this value for your clock settings
 }
 
-HAL_Delay(100); // ~10 frames/sec
 
-}
-
-
-void oled_Write_Cmd( unsigned char cmd )
+void oled_Write_Cmd(unsigned char cmd)
 {
-	GPIOB->BSRR = GPIO_BSRR_BS_8;
-	GPIOB->BSRR = GPIO_BSRR_BR_9;
-	GPIOB->BSRR = GPIO_BSRR_BR_8;
-	oled_Write(cmd);
-	GPIOB->BSRR = GPIO_BSRR_BS_8;
-
-    // make PB8 = CS# = 1
-    // make PB9 = D/C# = 0
-    // make PB8 = CS# = 0
-    // make PB8 = CS# = 1
-}
-
-void oled_Write_Data( unsigned char data )
-{
-
-	GPIOB->BSRR = GPIO_BSRR_BS_8;
-	GPIOB->BSRR = GPIO_BSRR_BS_9;
-	GPIOB->BSRR = GPIO_BSRR_BR_8;
-	oled_Write(data);
-	GPIOB->BSRR = GPIO_BSRR_BS_8;
-
-
-    // make PB8 = CS# = 1
-    // make PB9 = D/C# = 1
-    // make PB8 = CS# = 0
-    // make PB8 = CS# = 1
+    GPIOB->BSRR = (1 << 8);   // Set PB8 (CS#) = 1
+    GPIOB->BRR = (1 << 9);    // Clear PB9 (D/C#) = 0 for command
+    GPIOB->BRR = (1 << 8);    // Clear PB8 (CS#) = 0
+    oled_Write(cmd);
+    GPIOB->BSRR = (1 << 8);   // Set PB8 (CS#) = 1
 }
 
 
-void oled_Write( unsigned char Value )
+void oled_Write_Data(unsigned char data)
 {
-
-    /* Wait until SPI2 is ready for writing (TXE = 1 in SPI2_SR) */
-
-
-    /* Send one 8-bit character:
-       - This function also sets BIDIOE = 1 in SPI2_CR1
-    */
-    HAL_SPI_Transmit( &SPI_Handle, &Value, 1, HAL_MAX_DELAY );
+    GPIOB->BSRR = (1 << 8);   // Set PB8 (CS#) = 1
+    GPIOB->BSRR = (1 << 9);   // Set PB9 (D/C#) = 1 for data
+    GPIOB->BRR = (1 << 8);    // Clear PB8 (CS#) = 0
+    oled_Write(data);
+    GPIOB->BSRR = (1 << 8);   // Set PB8 (CS#) = 1
+}
 
 
-    /* Wait until transmission is complete (TXE = 1 in SPI2_SR) */
+void oled_Write(unsigned char Value)
+{
+    // Wait until SPI2 is ready for writing (TXE = 1 in SPI2_SR)
+    while ((SPI2->SR & SPI_SR_TXE) == 0);
 
-    while(!(SPI2->SR & SPI_SR_TXE));
+    // Send one 8-bit character
+    // This function also sets BIDIOE = 1 in SPI2_CR1
     HAL_SPI_Transmit(&SPI_Handle, &Value, 1, HAL_MAX_DELAY);
-    while(!(SPI2->SR & SPI_SR_TXE));
 
-    GPIOC->ODR ^= (1 << 8);
-
+    // Wait until transmission is complete (TXE = 1 in SPI2_SR)
+    while ((SPI2->SR & SPI_SR_TXE) == 0);
 }
 
 
-void oled_config( void )
+void oled_config(void)
 {
+    // Enable GPIOB clock
+    RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
 
-// Don't forget to enable GPIOB clock in RCC
-// Don't forget to configure PB13/PB15 as AF0
-// Don't forget to enable SPI2 clock in RCC
+    // Configure PB8, PB9, PB11 as outputs (mode = 01 for general purpose output)
+    // Each pin uses 2 bits in MODER register
+    // Clear bits first
+    GPIOB->MODER &= ~((3 << (8*2)) | (3 << (9*2)) | (3 << (11*2)));
+    // Set to 01 (output mode)
+    GPIOB->MODER |= ((1 << (8*2)) | (1 << (9*2)) | (1 << (11*2)));
 
-	RCC->AHBENR |= RCC_AHBENR_GPIOBEN; //Enable GPIOB Clock
-	RCC->APB1ENR |= RCC_APB1ENR_SPI2EN; //Enable SPI2 Clock
+    // Configure PB13 and PB15 as alternate function (mode = 10)
+    GPIOB->MODER &= ~((3 << (13*2)) | (3 << (15*2)));
+    GPIOB->MODER |= ((2 << (13*2)) | (2 << (15*2)));
 
-	GPIOB->MODER |= (1 << 16) | (1 << 18) | (1 << 22);
-	GPIOB->OTYPER &= ~((1<<8) | (1 << 9) | (1<<11));
+    // Set alternate function to AF0 for PB13 and PB15
+    // AFR[1] is for pins 8-15
+    // PB13 is bit position (13-8)*4 = 20
+    // PB15 is bit position (15-8)*4 = 28
+    GPIOB->AFR[1] &= ~((0xF << 20) | (0xF << 28));
+    // AF0 = 0000, so we just clear the bits (already done above)
 
-	GPIOB->MODER |= (2 << (26)) | (2 << (30));
-	GPIOB->AFR[1] &= ~((0xf << 20) | (0xF << 28));
+    // Enable SPI2 clock
+    RCC->APB1ENR |= RCC_APB1ENR_SPI2EN;
 
+    // Initialize SPI2 structure
     SPI_Handle.Instance = SPI2;
     SPI_Handle.Init.Direction = SPI_DIRECTION_1LINE;
     SPI_Handle.Init.Mode = SPI_MODE_MASTER;
@@ -427,59 +304,63 @@ void oled_config( void )
     SPI_Handle.Init.FirstBit = SPI_FIRSTBIT_MSB;
     SPI_Handle.Init.CRCPolynomial = 7;
 
-//
-// Initialize the SPI interface
-//
-    HAL_SPI_Init( &SPI_Handle );
+    // Initialize the SPI interface
+    HAL_SPI_Init(&SPI_Handle);
 
-//
-// Enable the SPI
-//
-    __HAL_SPI_ENABLE( &SPI_Handle );
+    // Enable the SPI
+    __HAL_SPI_ENABLE(&SPI_Handle);
 
+    // Reset LED Display (RES# = PB11)
+    GPIOB->BRR = (1 << 11);         // Set PB11 = 0 (active low reset)
+    for (volatile int i = 0; i < 100000; i++);  // Wait a few ms
 
-    /* Reset LED Display (RES# = PB11):
-       - make pin PB11 = 0, wait for a few ms
-       - make pin PB11 = 1, wait for a few ms
-    */
+    GPIOB->BSRR = (1 << 11);        // Set PB11 = 1 (release reset)
+    for (volatile int i = 0; i < 100000; i++);  // Wait a few ms
 
-    GPIOB->BSRR = GPIO_BSRR_BR_11;
-    HAL_Delay(10);
-    GPIOB->BSRR = GPIO_BSRR_BS_11;
-    HAL_Delay(10);
-
-
-
-//
-// Send initialization commands to LED Display
-//
-    for ( unsigned int i = 0; i < sizeof( oled_init_cmds ); i++ )
+    // Send initialization commands to LED Display
+    for (unsigned int i = 0; i < sizeof(oled_init_cmds); i++)
     {
-        oled_Write_Cmd( oled_init_cmds[i] );
+        oled_Write_Cmd(oled_init_cmds[i]);
     }
 
+    // Fill LED Display data memory (GDDRAM) with zeros
+    for (unsigned int page = 0; page < 8; page++)
+    {
+        // Select PAGE
+        oled_Write_Cmd(0xB0 | page);  // PAGE address: 1011 0xxx
 
-    /* Fill LED Display data memory (GDDRAM) with zeros:
-       - for each PAGE = 0, 1, ..., 7
-           set starting SEG = 0
-           call oled_Write_Data( 0x00 ) 128 times
-    */
+        // Set starting SEG = 0
+        oled_Write_Cmd(0x00);  // Lower column address = 0000
+        oled_Write_Cmd(0x10);  // Upper column address = 0000
 
-    // Clear display (fill GDDRAM with 0x00)
-    for (int page = 0; page < 8; page++) {
-        oled_Write_Cmd(0xB0 + page);
-        oled_Write_Cmd(0x00);
-        oled_Write_Cmd(0x10);
-        for (int col = 0; col < 128; col++) {
+        // Write 128 zeros to clear the page
+        for (unsigned int col = 0; col < 128; col++)
+        {
             oled_Write_Data(0x00);
         }
     }
-
-
 }
 
 
+// ============= EXAMPLE MAIN FUNCTION =============
+// Your main function should look something like this:
 
-#pragma GCC diagnostic pop
 
-// ----------------------------------------------------------------------------
+int main(int argc, char* argv[])
+{
+   // SystemClock48MHz();
+
+    // Your other initializations here (ADC, DAC, TIM2, TIM3, etc.)
+
+    oled_config();  // Initialize the OLED display
+    char * text1 = "Test";
+    int on = 1000;
+    int off = 0;
+    while (1)
+    {
+    	refresh_OLED(text1);
+
+
+    }
+}
+
