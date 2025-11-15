@@ -1,29 +1,44 @@
-//
-// This file is part of the GNU ARM Eclipse distribution.
-// Copyright (c) 2014 Liviu Ionescu.
-//
+/*
+ * This file is part of the µOS++ distribution.
+ *   (https://github.com/micro-os-plus)
+ * Copyright (c) 2014 Liviu Ionescu.
+ *
+ * Permission is hereby granted, free of charge, to any person
+ * obtaining a copy of this software and associated documentation
+ * files (the "Software"), to deal in the Software without
+ * restriction, including without limitation the rights to use,
+ * copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom
+ * the Software is furnished to do so, subject to the following
+ * conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+ * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
 
-// ----------------------------------------------------------------------------
-// School: University of Victoria, Canada.
-// Course: ECE 355 "Microprocessor-Based Systems".
-// This is template code for Part 2 of Introductory Lab.
-//
-// See "system/include/cmsis/stm32f051x8.h" for register/bit definitions.
-// See "system/src/cmsis/vectors_stm32f051x8.c" for handler declarations.
 // ----------------------------------------------------------------------------
 
 #include <stdio.h>
-#include "diag/Trace.h"
-#include "cmsis/cmsis_device.h"
+#include <stdlib.h>
+#include "diag/trace.h"
 
 // ----------------------------------------------------------------------------
 //
-// STM32F0 empty sample (trace via $(trace)).
+// STM32F0 empty sample (trace via DEBUG).
 //
 // Trace support is enabled by adding the TRACE macro definition.
-// By default the trace messages are forwarded to the $(trace) output,
+// By default the trace messages are forwarded to the DEBUG output,
 // but can be rerouted to any device or completely suppressed, by
-// changing the definitions required in system/src/diag/trace_impl.c
+// changing the definitions required in system/src/diag/trace-impl.c
 // (currently OS_USE_TRACE_ITM, OS_USE_TRACE_SEMIHOSTING_DEBUG/_STDOUT).
 //
 
@@ -36,31 +51,22 @@
 #pragma GCC diagnostic ignored "-Wmissing-declarations"
 #pragma GCC diagnostic ignored "-Wreturn-type"
 
+/*
+ *
+16 ADC channels: ADC_IN0, …, ADC_IN15
+ADC_IN0, ADC_IN1, …, ADC_IN7 ->PA0 – PA7
+ADC_IN8, ADC_IN9 -> PB0, PB1
+ADC_IN10, ADC_IN11, …, ADC_IN15 -> PC0 – PC5
+Configure PA1 (ADC_IN1) as an analog mode pin
+Note: Use ADC1->RegName to access ADC registers
+ *
+ *
+ *
+ * */
 
-/* Definitions of registers and their bits are
-   given in system/include/cmsis/stm32f051x8.h */
-
-
-/* Clock prescaler for TIM2 timer: no prescaling */
-#define myTIM2_PRESCALER ((uint16_t)0x0000)
-/* Maximum possible setting for overflow */
-#define myTIM2_PERIOD ((uint32_t)0xFFFFFFFF)
-
-void myGPIOB_Init(void);
-void myTIM2_Init(void);
-void myEXTI_Init(void);
-
-
-// Declare/initialize your global variables here...
-// NOTE: You'll need at least one global variable
-// (say, timerTriggered = 0 or 1) to indicate
-// whether TIM2 has started counting or not.
-int timerTriggered = 0;
-//int edge_counter =0;
-int counter = 0;
-
-
-/*** Call this function to boost the STM32F0xx clock to 48 MHz ***/
+void init_GPIOA();
+void init_DAC();
+void init_ADC();
 
 void SystemClock48MHz( void )
 {
@@ -95,189 +101,107 @@ void SystemClock48MHz( void )
 
 }
 
-/*****************************************************************/
+int main(int argc, char* argv[])
+{
+	// Initialize peripherals
+	init_GPIOA();
+	init_DAC();
+	init_ADC();
 
-
-int
-main(int argc, char* argv[])
- {
-
+	// At this stage the system clock should have already been configured
+	// at high speed.
 	SystemClock48MHz();
-
-	trace_printf("This is Part 2 of Introductory Lab...\n");
-	trace_printf("System clock: %u Hz\n", SystemCoreClock);
-
-        RCC->APB2ENR |= RCC_APB2ENR_SYSCFGCOMPEN;  /* Enable SYSCFG clock */
-
-	myGPIOB_Init();		/* Initialize I/O port PB */
-	myTIM2_Init();		/* Initialize timer TIM2 */
-	myEXTI_Init();		/* Initialize EXTI */
+	// Infinite loop
 	while (1)
 	{
-		// Nothing is going on here...
+		//Read ADC value
 	}
-
-	return 0;
-
 }
 
-
-void myGPIOB_Init()
+void init_GPIOA()
 {
-	/* Enable clock for GPIOB peripheral */
-	// Relevant register: RCC->AHBENR
-	RCC->AHBENR |= RCC_AHBENR_GPIOBEN; //_Msk
+	// Enable GPIOA clock
+	RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
 
+	// Enable ADC clock
+	RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
 
-	/* Configure PB2 as input */
-	// Relevant register: GPIOB->MODER
-	GPIOB-> MODER &= ~(GPIO_MODER_MODER2);
+	// Enable DAC clock
+	RCC->APB1ENR |= RCC_APB1ENR_DACEN;
 
-	/* Ensure no pull-up/pull-down for PB2 */
-	// Relevant register: GPIOB->PUPDR
-	GPIOB->PUPDR &= ~(GPIO_PUPDR_PUPDR2);
+	// Configure PA1 (ADC_IN1) as analog mode (MODER bits [3:2] = 11)
+	GPIOA->MODER |= (3U << 2);
+
+	// Configure PA4 (DAC_OUT1) as analog mode (MODER bits [9:8] = 11)
+	GPIOA->MODER |= (3U << 8);
 }
 
-
-void myTIM2_Init()
+void init_DAC()
 {
-	/* Enable clock for TIM2 peripheral */
-	// Relevant register: RCC->APB1ENR
+	/* DAC control register (DAC_CR)
+	 * Bit[0]: EN1 - Enable DAC channel 1
+	 * Bit[1]: BOFF1 - Buffer off
+	 * Bit[2]: TEN1 - Trigger enable
+	 */
 
-	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+	// Initialize DAC data holding register to 0
+	DAC->DHR12R1 = 0x00;
 
-
-	/* Configure TIM2: buffer auto-reload, count up, stop on overflow,
-	 * enable update events, interrupt on overflow only */
-	// Relevant register: TIM2->CR1
-	TIM2->CR1 = ((uint16_t) 0x008C);
-
-	/* Set clock prescaler value */
-	TIM2->PSC = myTIM2_PRESCALER;
-	/* Set auto-reloaded delay */
-	TIM2->ARR = myTIM2_PERIOD;
-
-	/* Update timer registers */
-	// Relevant register: TIM2->EGR
-	TIM2->EGR = ((uint16_t) 0x001);
-
-	/* Assign TIM2 interrupt priority = 0 in NVIC */
-	// Relevant register: NVIC->IP[3], or use NVIC_SetPriority
-	NVIC_SetPriority(TIM2_IRQn, 0);
-
-	/* Enable TIM2 interrupts in NVIC */
-	// Relevant register: NVIC->ISER[0], or use NVIC_EnableIRQ
-	NVIC_EnableIRQ(TIM2_IRQn);
-
-	/* Enable update interrupt generation */
-	// Relevant register: TIM2->DIER
-	TIM2->DIER |= TIM_DIER_UIE;
-
+	// Enable DAC channel 1
+	// EN1 = 1 (bit 0), BOFF1 = 1 (bit 1), TEN1 = 0 (bit 2)
+	DAC->CR |= (1U << 0);  // Enable channel 1
+	DAC->CR |= (1U << 1);  // Disable output buffer (set BOFF1)
 }
 
-
-void myEXTI_Init()
+void init_ADC()
 {
+	/* ADC interrupt and status register (ADC_ISR)
+	 * Bit [0]: ADRDY (ADC ready flag)
+	 *     ADRDY = 0/1: ADC is not/is ready to start conversion
+	 *     Hardware sets this bit after ADC is enabled (ADEN = 1) and when
+	 *     ADC becomes ready to accept conversion requests
+	 *     NOTE: Your software will need to wait for ADRDY = 1 before
+	 *     trying to start the conversion process
+	 * Bit [1]: EOSMP (end of sampling flag)
+	 * Bit [2]: EOC (end of conversion flag, after sampling)
+	 *     EOC = 0/1: channel conversion is not/is complete
+	 *     Hardware sets this bit at the end of each conversion of a channel
+	 *     when a new result is available in ADC_DR
+	 *     Hardware clears this bit when ADC_DR is read
+	 *     Software can clear this bit by writing 1 to it
+	 */
 
-	/* Map EXTI2 line to PB2 */
-	// Relevant register: SYSCFG->EXTICR[0]
-	SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI2_PB; //MIGHT BE WRONG
+	// Configure ADC before enabling it
 
-	/* EXTI2 line interrupts: set rising-edge trigger */
-	// Relevant register: EXTI->RTSR
-	EXTI->RTSR |= EXTI_RTSR_TR2;
+	// Set data resolution to 12 bits (RES[1:0] = 00 in ADC_CFGR1)
+	ADC1->CFGR1 &= ~(3U << 3);  // Clear RES bits
 
-	/* Unmask interrupts from EXTI2 line */
-	// Relevant register: EXTI->IMR
-	EXTI->IMR |= EXTI_IMR_MR2;
+	// Set right alignment (ALIGN = 0 in ADC_CFGR1)
+	ADC1->CFGR1 &= ~(1U << 5);  // Clear ALIGN bit
 
-	/* Assign EXTI2 interrupt priority = 0 in NVIC */
-	// Relevant register: NVIC->IP[2], or use NVIC_SetPriority
-	NVIC_SetPriority(EXTI2_3_IRQn, 0);
+	// Set continuous conversion mode (CONT = 1 in ADC_CFGR1)
+	ADC1->CFGR1 |= (1U << 13);  // Set CONT bit
 
-	/* Enable EXTI2 interrupts in NVIC */
-	// Relevant register: NVIC->ISER[0], or use NVIC_EnableIRQ
-	NVIC_EnableIRQ(EXTI2_3_IRQn);
-}
+	// Preserve ADC_DR on overrun (OVRMOD = 0 in ADC_CFGR1)
+	ADC1->CFGR1 &= ~(1U << 12);  // Clear OVRMOD bit
 
+	// Select channel 1 (ADC_IN1 = PA1)
+	ADC1->CHSELR = (1U << 1);  // Select channel 1
 
-/* This handler is declared in system/src/cmsis/vectors_stm32f051x8.c */
-/* Global variable to count overflows */
-uint32_t overflow_count = 0;
+	// Set sampling time (example: 239.5 ADC clock cycles, SMP = 111)
+	ADC1->SMPR |= (7U << 0);  // Set SMP[2:0] = 111
 
-void TIM2_IRQHandler()
-{
-    /* Check if update interrupt flag is set */
-    if ((TIM2->SR & TIM_SR_UIF) != 0)
-    {
-        trace_printf("\n*** Timer Overflow! ***\n");
-        overflow_count++; /* Increment overflow counter */
-        //Clear update interrupt flag reset timer
-        TIM2->SR &= ~(TIM_SR_UIF);
-        TIM2->CR1 |= TIM_CR1_CEN;
+	// Enable the ADC
+	ADC1->CR |= (1U << 0);  // Set ADEN bit
 
-    }
-}
+	// Wait until ADC is ready (ADRDY = 1)
+	while (!(ADC1->ISR & (1U << 0)));  // Wait for ADRDY
 
-void EXTI2_3_IRQHandler()
-{
-    /* Check if EXTI2 interrupt pending flag is set */
-    if ((EXTI->PR & EXTI_PR_PR2) != 0)
-    {
-        if (timerTriggered == 0)
-        {
-            /* First edge: start timer */
-            TIM2->CNT = 0x00; /* Clear counter */
-            overflow_count = 0; /* Reset overflow counter */
-            TIM2->CR1 |= TIM_CR1_CEN; /* Start timer */
-            timerTriggered = 1;
-        }
-        else
-        {
-            /* Second edge: stop timer and calculate period */
-            TIM2->CR1 &= ~(TIM_CR1_CEN); /* Stop timer */
-            uint32_t count = TIM2->CNT; /* Read counter */
-
-            uint64_t total_ticks = ((uint64_t)overflow_count * 0xFFFFFFFF) + count; /* Account for overflows */
-
-            // Calculate period in ms
-            float period_float = ((1.0f / 48000000.0f) * total_ticks) * 1000.0f;
-            // Calculate frequency in cHz (centiHertz)
-            float freq_float = 0;
-            if(period_float > 0)
-            {
-            	freq_float = (1.0f / (period_float));
-            }
-
-            /* Convert to unsigned int for printing */
-            uint32_t period = (uint32_t)period_float; /* Period in microseconds */
-            uint32_t freq = (uint32_t)(freq_float*10000000); /* Frequency in kHz */
-
-            /* Print results (correct unit: microseconds) */
-            trace_printf("PERIOD: %u ms\nFREQ: %u kHz\n", period, freq);
-
-            timerTriggered = 0; /* Reset for next measurement */
-        }
-
-        /* Clear EXTI2 interrupt pending flag */
-        EXTI->PR |= EXTI_PR_PR2;
-    }
+	// Start ADC conversion
+	ADC1->CR |= (1U << 2);  // Set ADSTART bit
 }
 
 
 #pragma GCC diagnostic pop
 
 // ----------------------------------------------------------------------------
-/*
- * MAX PERIOD:
- * Time for 1 over flow: 32 bit int so:  2^32 / 48 MHZ => 89.45 secs
- * Now how many overflows can we have => 32 bit int store the counter so (89.45 secs * 2^32) This is max period
- * BUT! that number cant fit into our 32bit period, so max value for period is 2^32 ms
- *
- * MIN PERIOD: One tick 1/48MHZ given no latency
- * MAX VAULE FOR FREQ IS 2^32 so min period =  1/2^32 ms
- * We foudn this to be around 2.49 us
- *
- * */
-
-
