@@ -1,16 +1,17 @@
-//
-// Complete OLED Display Functions for ECE 355 Lab
-// Make sure you have these includes at the top of main.c:
-//
 #include <stdio.h>
 #include "diag/Trace.h"
 #include <string.h>
 #include "cmsis/cmsis_device.h"
-//
 
-// These should be declared as GLOBAL variables (outside any function, before main):
+
+
 unsigned int Freq = 0;  // Measured frequency value
 unsigned int Res = 0;   // Measured resistance value
+
+#define myTIM3_PRESCALER ((uint16_t)47999)
+#define myTIM3_PERIOD ((uint16_t)50)
+
+
 SPI_HandleTypeDef SPI_Handle;
 
 // LED Display initialization commands
@@ -37,8 +38,7 @@ unsigned char oled_init_cmds[] =
     0xA0
 };
 
-// Character specifications for LED Display (see document for full array)
-// This is the full Characters array from the lab website
+// Character specifications for LED Display
 unsigned char Characters[][8] = {
     {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},  // SPACE (indices 0-31)
     {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
@@ -170,24 +170,96 @@ unsigned char Characters[][8] = {
     {0x08, 0x1C, 0x2A, 0x08, 0x08, 0x00, 0x00, 0x00}   // <- (127)
 };
 
-// Function prototypes (add these near the top, after includes):
+
+
 void oled_Write(unsigned char Value);
 void oled_Write_Cmd(unsigned char cmd);
 void oled_Write_Data(unsigned char data);
 void oled_config(void);
-void refresh_OLED(char * text);
+void refresh_OLED();
+void myTIM3_Init(void);
+
+void SystemClock48MHz( void )
+{
+//
+// Disable the PLL
+//
+    RCC->CR &= ~(RCC_CR_PLLON);
+//
+// Wait for the PLL to unlock
+//
+    while (( RCC->CR & RCC_CR_PLLRDY ) != 0 );
+//
+// Configure the PLL for a 48MHz system clock
+//
+    RCC->CFGR = 0x00280000;
+
+//
+// Enable the PLL
+//
+    RCC->CR |= RCC_CR_PLLON;
+
+//
+// Wait for the PLL to lock
+//
+    while (( RCC->CR & RCC_CR_PLLRDY ) != RCC_CR_PLLRDY );
+
+//
+// Switch the processor to the PLL clock source
+//
+    RCC->CFGR = ( RCC->CFGR & (~RCC_CFGR_SW_Msk)) | RCC_CFGR_SW_PLL;
+
+//
+// Update the system with the new clock frequency
+//
+    SystemCoreClockUpdate();
+
+}
+
+int main(int argc, char* argv[])
+{
+	SystemClock48MHz();
+
+    oled_config();
+
+    while (1)
+    {
+    	refresh_OLED();
+    }
+}
 
 
-// ============= FUNCTION IMPLEMENTATIONS =============
+void myTIM3_Init()
+{
+    /* Enable clock for TIM3 peripheral */
+    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
 
-void refresh_OLED(char * text)
+    /* Configure TIM3 for one-shot mode for debouncing */
+    TIM3->CR1 = TIM_CR1_OPM; // One-Pulse Mode
+
+    /* Set clock prescaler value */
+    TIM3->PSC = myTIM3_PRESCALER;
+    /* Set auto-reloaded delay */
+    TIM3->ARR = myTIM3_PERIOD;
+
+    /* Enable update interrupt generation */
+    TIM3->DIER |= TIM_DIER_UIE;
+
+    /* Assign TIM3 interrupt priority = 2 (lower than EXTI) in NVIC */
+    NVIC_SetPriority(TIM3_IRQn, 2);
+
+    /* Enable TIM3 interrupts in NVIC */
+    NVIC_EnableIRQ(TIM3_IRQn);
+}
+
+
+void refresh_OLED()
 {
     // Buffer size = at most 16 characters per PAGE + terminating '\0'
-    char Buffer[17];  // Changed to char instead of unsigned char
+	unsigned char Buffer[17];
 
     // Display resistance on PAGE 2
-    //snprintf(Buffer, sizeof(Buffer), "R: %5u Ohms", Res);
-    snprintf(Buffer, sizeof(Buffer), "%s", text);
+    snprintf(Buffer, sizeof(Buffer), "R: %5u Ohms", Res);
 
     // Select PAGE 2, set starting SEG to 2
     oled_Write_Cmd(0xB2);  // Select PAGE 2 (1011 0010)
@@ -205,13 +277,12 @@ void refresh_OLED(char * text)
     }
 
     // Display frequency on PAGE 4
-    //snprintf(Buffer, sizeof(Buffer), "F: %5u Hz", Freq);
-    snprintf(Buffer, sizeof(Buffer), "%s", text);
+    snprintf(Buffer, sizeof(Buffer), "F: %5u Hz", Freq);
 
     // Select PAGE 4, set starting SEG to 2
     oled_Write_Cmd(0xB6);  // Select PAGE 4 (1011 0100)
     oled_Write_Cmd(0x04);  // Set lower column address
-    oled_Write_Cmd(0x12);  // Set upper column address
+    oled_Write_Cmd(0x10);  // Set upper column address
 
     // Send each character to display
     for (int i = 0; Buffer[i] != '\0'; i++)
@@ -224,16 +295,16 @@ void refresh_OLED(char * text)
     }
 
     // Wait for ~100 ms using TIM3 for ~10 frames/sec refresh rate
-    // Note: You need to configure TIM3 first in your main() or init code
-    // Assuming TIM3 is configured with a suitable prescaler
-    // Adjust the count value based on your actual TIM3 clock configuration
     TIM3->CNT = 0;
-    while (TIM3->CNT < 4800);  // Adjust this value for your clock settings
+    while (TIM3->CNT < (myTIM3_PERIOD * 2));  // 2 * 50ms = 100ms
 }
 
 
 void oled_Write_Cmd(unsigned char cmd)
 {
+	/*
+	 * BSRR - Bit set/reset reg
+	 * */
     GPIOB->BSRR = (1 << 8);   // Set PB8 (CS#) = 1
     GPIOB->BRR = (1 << 9);    // Clear PB9 (D/C#) = 0 for command
     GPIOB->BRR = (1 << 8);    // Clear PB8 (CS#) = 0
@@ -274,20 +345,37 @@ void oled_config(void)
     // Configure PB8, PB9, PB11 as outputs (mode = 01 for general purpose output)
     // Each pin uses 2 bits in MODER register
     // Clear bits first
-    GPIOB->MODER &= ~((3 << (8*2)) | (3 << (9*2)) | (3 << (11*2)));
+    GPIOB -> MODER &= ~(GPIO_MODER_MODER8); //PB8
+    GPIOB -> MODER &= ~(GPIO_MODER_MODER9); //PB9
+    GPIOB -> MODER &= ~(GPIO_MODER_MODER11); //PB11
+
     // Set to 01 (output mode)
-    GPIOB->MODER |= ((1 << (8*2)) | (1 << (9*2)) | (1 << (11*2)));
+    GPIOB->MODER |= (GPIO_MODER_MODER8_0); //PB8 set to 01
+    GPIOB->MODER |= (GPIO_MODER_MODER9_0); //PB9 set to 01
+    GPIOB->MODER |= (GPIO_MODER_MODER11_0); //PB11 set to 01
+
 
     // Configure PB13 and PB15 as alternate function (mode = 10)
-    GPIOB->MODER &= ~((3 << (13*2)) | (3 << (15*2)));
-    GPIOB->MODER |= ((2 << (13*2)) | (2 << (15*2)));
+    // they being used by the SPI2 peripheral
+    // PB13 -> SPI Serial Clock
+    // PB15 -> MOSI
+
+    //Clear bits
+    GPIOB -> MODER &= ~(GPIO_MODER_MODER13);
+    GPIOB -> MODER &= ~(GPIO_MODER_MODER15);
+
+    // Set bits to mode 10
+    GPIOB->MODER |= (GPIO_MODER_MODER13_1);
+    GPIOB->MODER |= (GPIO_MODER_MODER15_1);
+
 
     // Set alternate function to AF0 for PB13 and PB15
     // AFR[1] is for pins 8-15
     // PB13 is bit position (13-8)*4 = 20
     // PB15 is bit position (15-8)*4 = 28
-    GPIOB->AFR[1] &= ~((0xF << 20) | (0xF << 28));
-    // AF0 = 0000, so we just clear the bits (already done above)
+    // AF0 = 0000
+    GPIOB->AFR[1] &= ~((GPIO_AFRH_AFRH5)); // AFRH5 because 13-8 = 5 (PB13 - ARR[1] starts at 8)
+    GPIOB->AFR[1] &= ~((GPIO_AFRH_AFRH7));
 
     // Enable SPI2 clock
     RCC->APB1ENR |= RCC_APB1ENR_SPI2EN;
@@ -311,11 +399,9 @@ void oled_config(void)
     __HAL_SPI_ENABLE(&SPI_Handle);
 
     // Reset LED Display (RES# = PB11)
-    GPIOB->BRR = (1 << 11);         // Set PB11 = 0 (active low reset)
-    for (volatile int i = 0; i < 100000; i++);  // Wait a few ms
+    GPIOB->BRR = GPIO_PIN_11;         // Set PB11 = 0 (active low reset)
 
-    GPIOB->BSRR = (1 << 11);        // Set PB11 = 1 (release reset)
-    for (volatile int i = 0; i < 100000; i++);  // Wait a few ms
+    GPIOB->BSRR = GPIO_PIN_11;        // Set PB11 = 1 (release reset)
 
     // Send initialization commands to LED Display
     for (unsigned int i = 0; i < sizeof(oled_init_cmds); i++)
@@ -340,27 +426,3 @@ void oled_config(void)
         }
     }
 }
-
-
-// ============= EXAMPLE MAIN FUNCTION =============
-// Your main function should look something like this:
-
-
-int main(int argc, char* argv[])
-{
-   // SystemClock48MHz();
-
-    // Your other initializations here (ADC, DAC, TIM2, TIM3, etc.)
-
-    oled_config();  // Initialize the OLED display
-    char * text1 = "Test";
-    int on = 1000;
-    int off = 0;
-    while (1)
-    {
-    	refresh_OLED(text1);
-
-
-    }
-}
-
