@@ -68,49 +68,137 @@ void init_GPIOA();
 void init_DAC();
 void init_ADC();
 
+void SystemClock48MHz( void )
+{
+//
+// Disable the PLL
+//
+    RCC->CR &= ~(RCC_CR_PLLON);
+//
+// Wait for the PLL to unlock
+//
+    while (( RCC->CR & RCC_CR_PLLRDY ) != 0 );
+//
+// Configure the PLL for 48-MHz system clock
+//
+    RCC->CFGR = 0x00280000;
+//
+// Enable the PLL
+//
+    RCC->CR |= RCC_CR_PLLON;
+//
+// Wait for the PLL to lock
+//
+    while (( RCC->CR & RCC_CR_PLLRDY ) != RCC_CR_PLLRDY );
+//
+// Switch the processor to the PLL clock source
+//
+    RCC->CFGR = ( RCC->CFGR & (~RCC_CFGR_SW_Msk)) | RCC_CFGR_SW_PLL;
+//
+// Update the system with the new clock frequency
+//
+    SystemCoreClockUpdate();
+
+}
+
 int main(int argc, char* argv[])
 {
-  // At this stage the system clock should have already been configured
-  // at high speed.
+	// Initialize peripherals
+	init_GPIOA();
+	init_DAC();
+	init_ADC();
 
-  // Infinite loop
-  while (1)
-    {
-       // Add your code here.
-    }
-  	  //
+	// At this stage the system clock should have already been configured
+	// at high speed.
+	SystemClock48MHz();
+	// Infinite loop
+	while (1)
+	{
+		//Read ADC value
+	}
 }
 
 void init_GPIOA()
 {
-	//Config port PA1 (ACD_IN1) as an analog mode pin
+	// Enable GPIOA clock
+	RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
+
+	// Enable ADC clock
+	RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
+
+	// Enable DAC clock
+	RCC->APB1ENR |= RCC_APB1ENR_DACEN;
+
+	// Configure PA1 (ADC_IN1) as analog mode (MODER bits [3:2] = 11)
+	GPIOA->MODER |= (3U << 2);
+
+	// Configure PA4 (DAC_OUT1) as analog mode (MODER bits [9:8] = 11)
+	GPIOA->MODER |= (3U << 8);
 }
+
 void init_DAC()
 {
-	/*	DAC control register (DAC_CR)
-	 * 	BIT[0]: EN1
-	 *  BIT[1]: BOFF1
-	 *  BIT[2]: TEN1
-	*/
+	/* DAC control register (DAC_CR)
+	 * Bit[0]: EN1 - Enable DAC channel 1
+	 * Bit[1]: BOFF1 - Buffer off
+	 * Bit[2]: TEN1 - Trigger enable
+	 */
 
-	DAC -> DHR12R1 = 0x00;
-	
+	// Initialize DAC data holding register to 0
+	DAC->DHR12R1 = 0x00;
+
+	// Enable DAC channel 1
+	// EN1 = 1 (bit 0), BOFF1 = 1 (bit 1), TEN1 = 0 (bit 2)
+	DAC->CR |= (1U << 0);  // Enable channel 1
+	DAC->CR |= (1U << 1);  // Disable output buffer (set BOFF1)
 }
+
 void init_ADC()
 {
 	/* ADC interrupt and status register (ADC_ISR)
-	*	Bit [0]: ADRDY (ADC ready flag)
-	*		ADRDY = 0/1: ADC is not/is ready to start conversion
-			• Hardware sets this bit after ADC is enabled (ADEN = 1) and when ADC becomes ready to accept conversion requests
-			• NOTE: Your software will need to wait for ADRDY = 1 before trying to start the conversion process
-	*	Bit [1]: EOSMP (end of sampling flag)
-	*	Bit [2]: EOC (end of conversion flag, after sampling)
-	*		 EOC = 0/1: channel conversion is not/is complete
-			• Hardware sets this bit at the end of each conversion of a channel when a new result is available in ADC_DR
-			• Hardware clears this bit when ADC_DR is read
-			• Software can clear this bit by writing 1 to it
-	*
-	*/
+	 * Bit [0]: ADRDY (ADC ready flag)
+	 *     ADRDY = 0/1: ADC is not/is ready to start conversion
+	 *     Hardware sets this bit after ADC is enabled (ADEN = 1) and when
+	 *     ADC becomes ready to accept conversion requests
+	 *     NOTE: Your software will need to wait for ADRDY = 1 before
+	 *     trying to start the conversion process
+	 * Bit [1]: EOSMP (end of sampling flag)
+	 * Bit [2]: EOC (end of conversion flag, after sampling)
+	 *     EOC = 0/1: channel conversion is not/is complete
+	 *     Hardware sets this bit at the end of each conversion of a channel
+	 *     when a new result is available in ADC_DR
+	 *     Hardware clears this bit when ADC_DR is read
+	 *     Software can clear this bit by writing 1 to it
+	 */
+
+	// Configure ADC before enabling it
+
+	// Set data resolution to 12 bits (RES[1:0] = 00 in ADC_CFGR1)
+	ADC1->CFGR1 &= ~(3U << 3);  // Clear RES bits
+
+	// Set right alignment (ALIGN = 0 in ADC_CFGR1)
+	ADC1->CFGR1 &= ~(1U << 5);  // Clear ALIGN bit
+
+	// Set continuous conversion mode (CONT = 1 in ADC_CFGR1)
+	ADC1->CFGR1 |= (1U << 13);  // Set CONT bit
+
+	// Preserve ADC_DR on overrun (OVRMOD = 0 in ADC_CFGR1)
+	ADC1->CFGR1 &= ~(1U << 12);  // Clear OVRMOD bit
+
+	// Select channel 1 (ADC_IN1 = PA1)
+	ADC1->CHSELR = (1U << 1);  // Select channel 1
+
+	// Set sampling time (example: 239.5 ADC clock cycles, SMP = 111)
+	ADC1->SMPR |= (7U << 0);  // Set SMP[2:0] = 111
+
+	// Enable the ADC
+	ADC1->CR |= (1U << 0);  // Set ADEN bit
+
+	// Wait until ADC is ready (ADRDY = 1)
+	while (!(ADC1->ISR & (1U << 0)));  // Wait for ADRDY
+
+	// Start ADC conversion
+	ADC1->CR |= (1U << 2);  // Set ADSTART bit
 }
 
 
