@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "diag/trace.h"
+#include "stm32f0xx.h"
 
 // ----------------------------------------------------------------------------
 //
@@ -68,39 +69,6 @@ void init_GPIOA();
 void init_DAC();
 void init_ADC();
 
-void SystemClock48MHz( void )
-{
-//
-// Disable the PLL
-//
-    RCC->CR &= ~(RCC_CR_PLLON);
-//
-// Wait for the PLL to unlock
-//
-    while (( RCC->CR & RCC_CR_PLLRDY ) != 0 );
-//
-// Configure the PLL for 48-MHz system clock
-//
-    RCC->CFGR = 0x00280000;
-//
-// Enable the PLL
-//
-    RCC->CR |= RCC_CR_PLLON;
-//
-// Wait for the PLL to lock
-//
-    while (( RCC->CR & RCC_CR_PLLRDY ) != RCC_CR_PLLRDY );
-//
-// Switch the processor to the PLL clock source
-//
-    RCC->CFGR = ( RCC->CFGR & (~RCC_CFGR_SW_Msk)) | RCC_CFGR_SW_PLL;
-//
-// Update the system with the new clock frequency
-//
-    SystemCoreClockUpdate();
-
-}
-
 int main(int argc, char* argv[])
 {
 	// Initialize peripherals
@@ -110,11 +78,11 @@ int main(int argc, char* argv[])
 
 	// At this stage the system clock should have already been configured
 	// at high speed.
-	SystemClock48MHz();
+
 	// Infinite loop
 	while (1)
 	{
-		//Read ADC value
+
 	}
 }
 
@@ -171,34 +139,40 @@ void init_ADC()
 	 *     Software can clear this bit by writing 1 to it
 	 */
 
+	// Make sure ADC is not already enabled
+	if (ADC1->CR & ADC_CR_ADEN) {
+		ADC1->CR |= ADC_CR_ADDIS;  // Disable ADC if enabled
+		while (ADC1->CR & ADC_CR_ADEN);  // Wait until disabled
+	}
+
 	// Configure ADC before enabling it
 
 	// Set data resolution to 12 bits (RES[1:0] = 00 in ADC_CFGR1)
-	ADC1->CFGR1 &= ~(3U << 3);  // Clear RES bits
+	ADC1->CFGR1 &= ~ADC_CFGR1_RES;  // Clear RES bits
 
 	// Set right alignment (ALIGN = 0 in ADC_CFGR1)
-	ADC1->CFGR1 &= ~(1U << 5);  // Clear ALIGN bit
+	ADC1->CFGR1 &= ~ADC_CFGR1_ALIGN;  // Clear ALIGN bit
 
 	// Set continuous conversion mode (CONT = 1 in ADC_CFGR1)
-	ADC1->CFGR1 |= (1U << 13);  // Set CONT bit
+	ADC1->CFGR1 |= ADC_CFGR1_CONT;  // Set CONT bit
 
 	// Preserve ADC_DR on overrun (OVRMOD = 0 in ADC_CFGR1)
-	ADC1->CFGR1 &= ~(1U << 12);  // Clear OVRMOD bit
+	ADC1->CFGR1 &= ~ADC_CFGR1_OVRMOD;  // Clear OVRMOD bit
 
 	// Select channel 1 (ADC_IN1 = PA1)
-	ADC1->CHSELR = (1U << 1);  // Select channel 1
+	ADC1->CHSELR = ADC_CHSELR_CHSEL1;  // Select channel 1
 
 	// Set sampling time (example: 239.5 ADC clock cycles, SMP = 111)
 	ADC1->SMPR |= (7U << 0);  // Set SMP[2:0] = 111
 
 	// Enable the ADC
-	ADC1->CR |= (1U << 0);  // Set ADEN bit
+	ADC1->CR |= ADC_CR_ADEN;  // Set ADEN bit
 
 	// Wait until ADC is ready (ADRDY = 1)
-	while (!(ADC1->ISR & (1U << 0)));  // Wait for ADRDY
+	while (!(ADC1->ISR & ADC_ISR_ADRDY));  // Wait for ADRDY
 
 	// Start ADC conversion
-	ADC1->CR |= (1U << 2);  // Set ADSTART bit
+	ADC1->CR |= ADC_CR_ADSTART;  // Set ADSTART bit
 }
 
 
