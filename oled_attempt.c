@@ -234,22 +234,11 @@ void myTIM3_Init()
     /* Enable clock for TIM3 peripheral */
     RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
 
-    /* Configure TIM3 for one-shot mode for debouncing */
-    TIM3->CR1 = TIM_CR1_OPM; // One-Pulse Mode
-
     /* Set clock prescaler value */
     TIM3->PSC = myTIM3_PRESCALER;
     /* Set auto-reloaded delay */
     TIM3->ARR = myTIM3_PERIOD;
 
-    /* Enable update interrupt generation */
-    TIM3->DIER |= TIM_DIER_UIE;
-
-    /* Assign TIM3 interrupt priority = 2 (lower than EXTI) in NVIC */
-    NVIC_SetPriority(TIM3_IRQn, 2);
-
-    /* Enable TIM3 interrupts in NVIC */
-    NVIC_EnableIRQ(TIM3_IRQn);
 }
 
 
