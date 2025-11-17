@@ -11,7 +11,7 @@
 /* Delay count for TIM2 timer: 1/4 sec at 48 MHz */
 #define myTIM2_PERIOD ((uint32_t)12000000)
 
-// <<< DEFINES FOR DEBOUNCE TIMER (TIM3)
+
 /* Prescaler for a 1kHz timer clock (48MHz / (47999 + 1)),  1 clock cycle per millisecond*/
 #define myTIM3_PRESCALER ((uint16_t)47999)
 /* 50ms debounce delay (50 * 1ms) */
@@ -21,7 +21,7 @@
 void myGPIOA_Init(void);
 void myGPIOC_Init(void);
 void myTIM2_Init(void);
-void myTIM3_Init(void); // <<< ADDED: Prototype for debounce timer init
+void myTIM3_Init(void);
 void myEXTI_Init(void);
 
 /* Global variable indicating which LED is blinking */
@@ -64,15 +64,14 @@ void SystemClock48MHz( void )
 int main(int argc, char* argv[])
 {
     SystemClock48MHz();
-    //trace_printf("System clock: %u Hz\n", SystemCoreClock);
 
     RCC->APB2ENR |= RCC_APB2ENR_SYSCFGCOMPEN; /* Enable SYSCFG clock */
 
-    myGPIOA_Init();  /* Initialize I/O port PA */
-    myGPIOC_Init();  /* Initialize I/O port PC */
-    myTIM2_Init();   /* Initialize timer TIM2 for blinking */
-    myTIM3_Init();   // <<< ADDED: Initialize TIM3 for debouncing
-    myEXTI_Init();   /* Initialize EXTI for PA0 */
+    myGPIOA_Init();  // Initialize I/O port PA
+    myGPIOC_Init();  // Initialize I/O port PC
+    myTIM2_Init();   // Initialize timer TIM2 for blinking
+    myTIM3_Init();   // Initialize TIM3 for debouncing
+    myEXTI_Init();   // Initialize EXTI for PA0
 
     while (1)
     {
@@ -110,7 +109,8 @@ void myGPIOC_Init()
 }
 // Blink speed
 void myTIM2_Init()
-{//FROM LAB1 CODE
+{//FROM LAB1 CODE + added interrupt
+
     /* Enable clock for TIM2 peripheral */
     RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
 
@@ -144,7 +144,7 @@ void myTIM3_Init()
     /* Enable clock for TIM3 peripheral */
     RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
 
-    /* Configure TIM3 for one-shot mode for debouncing */
+    // Configure TIM3 for one-shot mode for debouncing - "generate a pulse of a programmable length" - ControllersTech
     TIM3->CR1 = TIM_CR1_OPM; // One-Pulse Mode
 
     /* Set clock prescaler value */
