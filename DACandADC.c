@@ -66,7 +66,7 @@ void init_DAC(void)
      * TEN1 = 0  (no hardware trigger)
      */
     DAC->CR |= DAC_CR_EN1;      // enable
-    //WHAT DOES THIS DO
+    // Turn off buffer to make vaules more precise
     DAC->CR |= DAC_CR_BOFF1;    // buffer off
 }
 
