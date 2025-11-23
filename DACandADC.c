@@ -85,8 +85,6 @@ void init_ADC(void)
     ADC1->CFGR1 &= ~ADC_CFGR1_ALIGN;    // right alignment (data stored in lower 12 bits of the 16-bit register)
     ADC1->CFGR1 |=  ADC_CFGR1_CONT;     // continuous mode, ADC moves on to next conversion right after last
 
-    // WHY DO WE NEED THIS
-    ADC1->CFGR1 &= ~ADC_CFGR1_OVRMOD;   // keep old data on overrun
 
     // Clear channels and pick channel 1 (PA1)
     ADC1->CHSELR = 0;
