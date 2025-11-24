@@ -1,39 +1,50 @@
 #include <stdio.h>
-#include "diag/Trace.h"
+#include <stdlib.h>
+#include "diag/trace.h"
+#include "stm32f0xx.h"
 #include "cmsis/cmsis_device.h"
-#include <string.h>
 
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Wmissing-declarations"
-#pragma GCC diagnostic ignored "-Wreturn-type"
+// Frequency measurement variables
+volatile int timerTriggered = 0;
+volatile uint32_t overflow_count = 0;
+volatile uint32_t measured_frequency = 0;  // In Hz
+volatile uint32_t measured_period = 0;     // In ms
 
-/* Clock prescaler for TIM2 timer: no prescaling */
+// Source selection: 0 = Function Generator (PB2), 1 = 555 Timer (PB3)
+volatile uint8_t frequency_source = 0;
+
+// ADC/DAC variables
+volatile uint16_t pot_value = 0;
+volatile uint16_t pot_voltage = 0;  // In mV
+volatile uint32_t pot_resistance = 0;  // In Ohms
+
+// LED blinking
+volatile uint16_t blinkingLED = ((uint16_t)0x0100);  // Start with blue LED (PC8)
+
+// OLED refresh flag
+volatile uint8_t oled_refresh_flag = 0;
+
+
+// TIM2: Frequency measurement timer (no prescaling, max period)
 #define myTIM2_PRESCALER ((uint16_t)0x0000)
-/* Maximum possible setting for overflow */
 #define myTIM2_PERIOD ((uint32_t)0xFFFFFFFF)
 
-/* Prescaler for a 1kHz timer clock (48MHz / (47999 + 1)), 1 clock cycle per millisecond*/
+// TIM3: Debounce timer for USER button (1ms per tick, 50ms debounce)
 #define myTIM3_PRESCALER ((uint16_t)47999)
-/* 50ms debounce delay (50 * 1ms) */
 #define myTIM3_PERIOD ((uint16_t)50)
 
-/* Assume 10k Ohm potentiometer */
-#define POT_MAX_RES 10000
+// TIM4: OLED refresh timer (1ms per tick, 100ms refresh)
+#define myTIM4_PRESCALER ((uint16_t)47999)
+#define myTIM4_PERIOD ((uint16_t)100)
 
-/* Vref in mV */
-#define VREF_MV 3300
+// ============================================================================
+// OLED DISPLAY DEFINITIONS
+// ============================================================================
 
-volatile unsigned int Freq = 0; // Measured frequency value
-volatile unsigned int Res = 0; // Measured resistance value
-volatile uint8_t display_update_flag = 1; // Flag to trigger display update (start with 1 for initial display)
-volatile int timer_started = 0;
-volatile uint32_t overflow_count = 0;
-volatile int current_source = 0; // 0: FG (PB2), 1: 555 (PB3)
 SPI_HandleTypeDef SPI_Handle;
 
-/* LED Display initialization commands */
-unsigned char oled_init_cmds[] =
-{
+// OLED initialization commands
+unsigned char oled_init_cmds[] = {
     0xAE,
     0x20, 0x00,
     0x40,
@@ -186,84 +197,90 @@ unsigned char Characters[][8] = {
     {0x08, 0x1C, 0x2A, 0x08, 0x08, 0x00, 0x00, 0x00} // <- (127)
 };
 
+// ============================================================================
+// FUNCTION PROTOTYPES
+// ============================================================================
+
+// System initialization
+void SystemClock48MHz(void);
+
+// GPIO initialization
+void myGPIOA_Init(void);
+void myGPIOB_Init(void);
+void myGPIOC_Init(void);
+
+// Peripheral initialization
+void myADC_Init(void);
+void myDAC_Init(void);
+void myTIM2_Init(void);
+void myTIM3_Init(void);
+void myTIM4_Init(void);
+void myEXTI_Init(void);
+void mySPI_Init(void);
+
+// OLED functions
 void oled_Write(unsigned char Value);
 void oled_Write_Cmd(unsigned char cmd);
 void oled_Write_Data(unsigned char data);
 void oled_config(void);
 void refresh_OLED(void);
 
-void myGPIOA_Init(void);
-void myGPIOB_Init(void);
-void myGPIOC_Init(void);
-void myTIM2_Init(void);
-void myTIM3_Init(void);
-void myEXTI_Init(void);
-void init_ADC(void);
-void init_DAC(void);
+// Utility functions
+void calculate_resistance(void);
 
-/*** Call this function to boost the STM32F0xx clock to 48 MHz ***/
-void SystemClock48MHz( void )
-{
-    RCC->CR &= ~(RCC_CR_PLLON);
-    while (( RCC->CR & RCC_CR_PLLRDY ) != 0 );
-    RCC->CFGR = 0x00280000;
-    RCC->CR |= RCC_CR_PLLON;
-    while (( RCC->CR & RCC_CR_PLLRDY ) != RCC_CR_PLLRDY );
-    RCC->CFGR = ( RCC->CFGR & (~RCC_CFGR_SW_Msk)) | RCC_CFGR_SW_PLL;
-    SystemCoreClockUpdate();
-}
+// ============================================================================
+// MAIN FUNCTION
+// ============================================================================
 
 int main(int argc, char* argv[])
 {
+    // Initialize system clock to 48 MHz
     SystemClock48MHz();
 
-    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGCOMPEN; /* Enable SYSCFG clock */
+    trace_printf("ECE 355 Project: PWM Signal Monitoring System\n");
+    trace_printf("System clock: %u Hz\n", SystemCoreClock);
 
-    myGPIOA_Init(); // Initialize I/O port PA
-    myGPIOB_Init(); // Initialize I/O port PB
-    myGPIOC_Init(); // Initialize I/O port PC
-    myTIM2_Init(); // Initialize timer TIM2 for frequency measurement
-    myTIM3_Init(); // Initialize TIM3 for debouncing
-    myEXTI_Init(); // Initialize EXTI for PA0, PB2, PB3
-    init_DAC(); // Initialize DAC
-    init_ADC(); // Initialize ADC
+    // Enable SYSCFG clock (needed for EXTI)
+    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGCOMPEN;
 
-    oled_config();
+    // Initialize all peripherals
+    myGPIOA_Init();    // PA0 (USER button), PA1 (ADC), PA4 (DAC)
+    myGPIOB_Init();    // PB2 (Func Gen), PB3 (555), PB8/9/11/13/15 (SPI/OLED)
+    myGPIOC_Init();    // PC8/PC9 (LEDs)
+    
+    myADC_Init();      // ADC for potentiometer
+    myDAC_Init();      // DAC for optocoupler
+    myTIM2_Init();     // Timer for frequency measurement
+    myTIM3_Init();     // Timer for button debounce
+    myTIM4_Init();     // Timer for OLED refresh
+    myEXTI_Init();     // External interrupts (PA0, PB2, PB3)
+    mySPI_Init();      // SPI for OLED display
+    
+    oled_config();     // Configure OLED display
 
-    // Initial LED: blue for FG
-    GPIOC->BSRR = ((uint32_t)0x0100);
-    GPIOC->BRR = ((uint32_t)0x0200);
+    trace_printf("Initialization complete!\n");
+    trace_printf("Press USER button to toggle frequency source\n");
 
-    // Display initial values
-    refresh_OLED();
-
+    // Main loop
     while (1)
     {
-        // Poll ADC for potentiometer value
+        // Poll ADC (continuous conversion)
         if (ADC1->ISR & ADC_ISR_EOC)
         {
-            // Read ADC value
-            uint16_t pot_value = (uint16_t)ADC1->DR;
-
-            // Calculate voltage in mV
-            uint16_t voltage = (pot_value * VREF_MV) / 4095;
-
-            // Calculate resistance (assuming 10k pot, linear)
-            Res = (pot_value * POT_MAX_RES) / 4095;
-
-            trace_printf("Voltage: %d mV, Res: %u\n", voltage, Res);
-
-            // Send ADC value to DAC to control optocoupler
+            pot_value = (uint16_t)ADC1->DR;
+            pot_voltage = (pot_value * 3000) / 4095;  // Convert to mV
+            
+            // Calculate resistance
+            calculate_resistance();
+            
+            // Send ADC value to DAC
             DAC->DHR12R1 = pot_value;
-
-            // Trigger display update
-            display_update_flag = 1;
         }
 
-        /* Update display when flag is set */
-        if (display_update_flag)
+        // Refresh OLED when timer flag is set
+        if (oled_refresh_flag)
         {
-            display_update_flag = 0;
+            oled_refresh_flag = 0;
             refresh_OLED();
         }
     }
@@ -271,290 +288,235 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-// User Button, ADC, DAC
-void myGPIOA_Init()
+
+void SystemClock48MHz(void)
 {
-    /* Enable clock for GPIOA peripheral */
+    // Disable the PLL
+    RCC->CR &= ~(RCC_CR_PLLON);
+    
+    // Wait for the PLL to unlock
+    while ((RCC->CR & RCC_CR_PLLRDY) != 0);
+    
+    // Configure the PLL for 48MHz system clock
+    RCC->CFGR = 0x00280000;
+    
+    // Enable the PLL
+    RCC->CR |= RCC_CR_PLLON;
+    
+    // Wait for the PLL to lock
+    while ((RCC->CR & RCC_CR_PLLRDY) != RCC_CR_PLLRDY);
+    
+    // Switch the processor to the PLL clock source
+    RCC->CFGR = (RCC->CFGR & (~RCC_CFGR_SW_Msk)) | RCC_CFGR_SW_PLL;
+    
+    // Update the system with the new clock frequency
+    SystemCoreClockUpdate();
+}
+
+void myGPIOA_Init(void)
+{
+    // Enable GPIOA clock
     RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
-
-    /* Configure PA0 as input for button */
-    GPIOA->MODER &= ~(GPIO_MODER_MODER0);
-
-    /* Ensure no pull-up/pull-down for PA0 */
-    GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR0);
-
-    /* Configure PA1 as analog for ADC */
-    GPIOA->MODER |= (3U << 2); // PA1 → analog (MODER[3:2] = 11)
-
-    /* Configure PA4 as analog for DAC */
-    GPIOA->MODER |= (3U << 8); // PA4 → analog (MODER[9:8] = 11)
-}
-
-// FG and 555 inputs
-void myGPIOB_Init()
-{
-    /* Enable clock for GPIOB peripheral */
-    RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
-
-    /* Configure PB2 as input */
-    GPIOB->MODER &= ~(GPIO_MODER_MODER2);
-
-    /* Ensure no pull-up/pull-down for PB2 */
-    GPIOB->PUPDR &= ~(GPIO_PUPDR_PUPDR2);
-
-    /* Configure PB3 as input */
-    GPIOB->MODER &= ~(GPIO_MODER_MODER3);
-
-    /* Ensure no pull-up/pull-down for PB3 */
-    GPIOB->PUPDR &= ~(GPIO_PUPDR_PUPDR3);
-}
-
-// LEDs
-void myGPIOC_Init()
-{
-    /* Enable clock for GPIOC peripheral */
-    RCC->AHBENR |= RCC_AHBENR_GPIOCEN;
-
-    /* Configure PC8 and PC9 as outputs */
-    GPIOC->MODER |= (GPIO_MODER_MODER8_0 | GPIO_MODER_MODER9_0);
-    /* Ensure push-pull mode selected for PC8 and PC9 */
-    GPIOC->OTYPER &= ~(GPIO_OTYPER_OT_8 | GPIO_OTYPER_OT_9);
-    /* Ensure high-speed mode for PC8 and PC9 */
-    GPIOC->OSPEEDR |= (GPIO_OSPEEDER_OSPEEDR8 | GPIO_OSPEEDER_OSPEEDR9);
-    /* Ensure no pull-up/pull-down for PC8 and PC9 */
-    GPIOC->PUPDR &= ~(GPIO_PUPDR_PUPDR8 | GPIO_PUPDR_PUPDR9);
-}
-
-// Frequency measurement timer
-void myTIM2_Init()
-{
-    /* Enable clock for TIM2 peripheral */
-    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
-
-    /* Configure TIM2: buffer auto-reload, count up, stop on overflow,
-     * enable update events, interrupt on overflow only */
-    TIM2->CR1 = ((uint16_t)0x008C);
-
-    /* Set clock prescaler value */
-    TIM2->PSC = myTIM2_PRESCALER;
-    /* Set auto-reloaded delay */
-    TIM2->ARR = myTIM2_PERIOD;
-
-    /* Update timer registers */
-    TIM2->EGR = ((uint16_t)0x0001);
-
-    /* Assign TIM2 interrupt priority = 0 in NVIC */
-    NVIC_SetPriority(TIM2_IRQn, 0);
-
-    /* Enable TIM2 interrupts in NVIC */
-    NVIC_EnableIRQ(TIM2_IRQn);
-
-    /* Enable update interrupt generation */
-    TIM2->DIER |= TIM_DIER_UIE;
-}
-
-// Debounce timer
-void myTIM3_Init()
-{
-    /* Enable clock for TIM3 peripheral */
-    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
-
-    // Configure TIM3 for one-shot mode for debouncing
-    TIM3->CR1 = TIM_CR1_OPM; // One-Pulse Mode
-
-    /* Set clock prescaler value */
-    TIM3->PSC = myTIM3_PRESCALER;
-    /* Set auto-reloaded delay */
-    TIM3->ARR = myTIM3_PERIOD;
-
-    /* Enable update interrupt generation */
-    TIM3->DIER |= TIM_DIER_UIE;
-
-    /* Assign TIM3 interrupt priority = 2 (lower than EXTI) in NVIC */
-    NVIC_SetPriority(TIM3_IRQn, 2);
-
-    /* Enable TIM3 interrupts in NVIC */
-    NVIC_EnableIRQ(TIM3_IRQn);
-}
-
-void myEXTI_Init()
-{
-    /* Map PA0 to EXTI0 */
-    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI0;
-    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI0_PA;
-
-    /* Map PB2 to EXTI2 */
-    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI2;
-    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI2_PB;
-
-    /* Map PB3 to EXTI3 */
-    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI3;
-    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PB;
-
-    /* Enable EXTI0 interrupt (button, rising edge) */
-    EXTI->IMR |= EXTI_IMR_MR0;
-    EXTI->RTSR |= EXTI_RTSR_TR0;
-
-    /* Enable EXTI2 interrupt initially (FG, rising edge) */
-    EXTI->IMR |= EXTI_IMR_MR2;
-    EXTI->RTSR |= EXTI_RTSR_TR2;
-
-    /* EXTI3 initially disabled */
-    EXTI->RTSR |= EXTI_RTSR_TR3; // Enable rising edge, but IMR off
-
-    /* Configure NVIC for EXTI0_1 (PA0) */
-    NVIC_SetPriority(EXTI0_1_IRQn, 1);
-    NVIC_EnableIRQ(EXTI0_1_IRQn);
-
-    /* Configure NVIC for EXTI2_3 (PB2/PB3) */
-    NVIC_SetPriority(EXTI2_3_IRQn, 1);
-    NVIC_EnableIRQ(EXTI2_3_IRQn);
-}
-
-void init_DAC(void)
-{
-    // Enable DAC clock
-    RCC->APB1ENR |= RCC_APB1ENR_DACEN;
-
-    // Make sure DAC is disabled before configuring
-    if (DAC->CR & DAC_CR_EN1) {
-        DAC->CR &= ~DAC_CR_EN1;
-    }
-
-    // init output to 0
-    DAC->DHR12R1 = 0;
-
-    /* EN1 = 1 (enable channel 1)
-     * BOFF1 = 0 (enable output buffer)
-     * TEN1 = 0 (no hardware trigger)
-     */
-    DAC->CR |= DAC_CR_EN1; // enable
-    DAC->CR &= ~DAC_CR_BOFF1; // buffer on
-}
-
-void init_ADC(void)
-{
+    
     // Enable ADC clock
     RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
-
-    // Disable ADC if it was already on
-    if (ADC1->CR & ADC_CR_ADEN) {
-        ADC1->CR |= ADC_CR_ADDIS;
-        while (ADC1->CR & ADC_CR_ADEN);
-    }
-
-    ADC1->CFGR1 &= ~ADC_CFGR1_RES; // 12-bit resolution
-    ADC1->CFGR1 &= ~ADC_CFGR1_ALIGN; // right alignment
-    ADC1->CFGR1 |= ADC_CFGR1_CONT; // continuous mode
-    ADC1->CFGR1 &= ~ADC_CFGR1_OVRMOD; // keep old data on overrun
-
-    // Clear channels and pick channel 1 (PA1)
-    ADC1->CHSELR = 0;
-    ADC1->CHSELR |= ADC_CHSELR_CHSEL1;
-
-    // Config sampling time
-    ADC1->SMPR |= (7U << 0);
-
-    ADC1->CR |= ADC_CR_ADEN;
-    while (!(ADC1->ISR & ADC_ISR_ADRDY));
-
-    // Start the conversion
-    ADC1->CR |= ADC_CR_ADSTART;
+    
+    // Enable DAC clock
+    RCC->APB1ENR |= RCC_APB1ENR_DACEN;
+    
+    // PA0: Input (USER button)
+    GPIOA->MODER &= ~(GPIO_MODER_MODER0);
+    GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR0);
+    
+    // PA1: Analog input (ADC - Potentiometer)
+    GPIOA->MODER |= (3U << 2);
+    
+    // PA4: Analog output (DAC - Optocoupler control)
+    GPIOA->MODER |= (3U << 8);
 }
 
-void refresh_OLED()
-{
-    unsigned char Buffer[17];
-
-    // Display resistance on PAGE 2
-    snprintf(Buffer, sizeof(Buffer), "R: %5u Ohms", Res);
-
-    oled_Write_Cmd(0xB2);
-    oled_Write_Cmd(0x02);
-    oled_Write_Cmd(0x10);
-
-    for (int i = 0; Buffer[i] != '\0'; i++)
-    {
-        unsigned char c = Buffer[i];
-        for (int j = 0; j < 8; j++)
-        {
-            oled_Write_Data(Characters[c][j]);
-        }
-    }
-
-    // Display frequency on PAGE 4
-    snprintf(Buffer, sizeof(Buffer), "F: %5u Hz", Freq);
-
-    oled_Write_Cmd(0xB4);
-    oled_Write_Cmd(0x02);
-    oled_Write_Cmd(0x10);
-
-    for (int i = 0; Buffer[i] != '\0'; i++)
-    {
-        unsigned char c = Buffer[i];
-        for (int j = 0; j < 8; j++)
-        {
-            oled_Write_Data(Characters[c][j]);
-        }
-    }
-
-    // Approximate 100ms delay (adjust based on observation)
-    for (volatile uint32_t i = 0; i < 4800000; i++);
-}
-
-void oled_Write_Cmd(unsigned char cmd)
-{
-    GPIOB->BSRR = (1 << 8);
-    GPIOB->BRR = (1 << 9);
-    GPIOB->BRR = (1 << 8);
-    oled_Write(cmd);
-    GPIOB->BSRR = (1 << 8);
-}
-
-void oled_Write_Data(unsigned char data)
-{
-    GPIOB->BSRR = (1 << 8);
-    GPIOB->BSRR = (1 << 9);
-    GPIOB->BRR = (1 << 8);
-    oled_Write(data);
-    GPIOB->BSRR = (1 << 8);
-}
-
-void oled_Write(unsigned char Value)
-{
-    while ((SPI2->SR & SPI_SR_TXE) == 0);
-    HAL_SPI_Transmit(&SPI_Handle, &Value, 1, HAL_MAX_DELAY);
-    while ((SPI2->SR & SPI_SR_TXE) == 0);
-}
-
-void oled_config(void)
+void myGPIOB_Init(void)
 {
     // Enable GPIOB clock
     RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
-
-    // Configure PB8, PB9, PB11 as outputs
+    
+    // PB2: Input (Function Generator - EXTI2)
+    GPIOB->MODER &= ~(GPIO_MODER_MODER2);
+    GPIOB->PUPDR &= ~(GPIO_PUPDR_PUPDR2);
+    
+    // PB3: Input (555 Timer - EXTI3)
+    GPIOB->MODER &= ~(GPIO_MODER_MODER3);
+    GPIOB->PUPDR &= ~(GPIO_PUPDR_PUPDR3);
+    
+    // PB8: Output (CS# - Chip Select)
     GPIOB->MODER &= ~(GPIO_MODER_MODER8);
+    GPIOB->MODER |= GPIO_MODER_MODER8_0;
+    
+    // PB9: Output (D/C# - Data/Command)
     GPIOB->MODER &= ~(GPIO_MODER_MODER9);
+    GPIOB->MODER |= GPIO_MODER_MODER9_0;
+    
+    // PB11: Output (RES# - Reset)
     GPIOB->MODER &= ~(GPIO_MODER_MODER11);
-
-    GPIOB->MODER |= (GPIO_MODER_MODER8_0);
-    GPIOB->MODER |= (GPIO_MODER_MODER9_0);
-    GPIOB->MODER |= (GPIO_MODER_MODER11_0);
-
-    // Configure PB13 and PB15 as alternate function
+    GPIOB->MODER |= GPIO_MODER_MODER11_0;
+    
+    // PB13: Alternate Function (SPI2 SCK)
     GPIOB->MODER &= ~(GPIO_MODER_MODER13);
+    GPIOB->MODER |= GPIO_MODER_MODER13_1;
+    GPIOB->AFR[1] &= ~(GPIO_AFRH_AFRH5);  // AF0
+    
+    // PB15: Alternate Function (SPI2 MOSI)
     GPIOB->MODER &= ~(GPIO_MODER_MODER15);
+    GPIOB->MODER |= GPIO_MODER_MODER15_1;
+    GPIOB->AFR[1] &= ~(GPIO_AFRH_AFRH7);  // AF0
+}
 
-    GPIOB->MODER |= (GPIO_MODER_MODER13_1);
-    GPIOB->MODER |= (GPIO_MODER_MODER15_1);
+void myGPIOC_Init(void)
+{
+    // Enable GPIOC clock
+    RCC->AHBENR |= RCC_AHBENR_GPIOCEN;
+    
+    // PC8: Output (Blue LED)
+    GPIOC->MODER |= GPIO_MODER_MODER8_0;
+    GPIOC->OTYPER &= ~GPIO_OTYPER_OT_8;
+    GPIOC->OSPEEDR |= GPIO_OSPEEDER_OSPEEDR8;
+    GPIOC->PUPDR &= ~GPIO_PUPDR_PUPDR8;
+    
+    // PC9: Output (Green LED)
+    GPIOC->MODER |= GPIO_MODER_MODER9_0;
+    GPIOC->OTYPER &= ~GPIO_OTYPER_OT_9;
+    GPIOC->OSPEEDR |= GPIO_OSPEEDER_OSPEEDR9;
+    GPIOC->PUPDR &= ~GPIO_PUPDR_PUPDR9;
+}
 
-    // Set alternate function to AF0 for PB13 and PB15
-    GPIOB->AFR[1] &= ~((GPIO_AFRH_AFRH5));
-    GPIOB->AFR[1] &= ~((GPIO_AFRH_AFRH7));
+void myADC_Init(void)
+{
+    // Disable ADC if already enabled
+    if (ADC1->CR & ADC_CR_ADEN)
+    {
+        ADC1->CR |= ADC_CR_ADDIS;
+        while (ADC1->CR & ADC_CR_ADEN);
+    }
+    
+    // Configure ADC
+    ADC1->CFGR1 &= ~ADC_CFGR1_RES;      // 12-bit resolution
+    ADC1->CFGR1 &= ~ADC_CFGR1_ALIGN;    // Right alignment
+    ADC1->CFGR1 |= ADC_CFGR1_CONT;      // Continuous mode
+    
+    // Select channel 1 (PA1)
+    ADC1->CHSELR = 0;
+    ADC1->CHSELR |= ADC_CHSELR_CHSEL1;
+    
+    // Set sampling time
+    ADC1->SMPR |= (7U << 0);
+    
+    // Enable and start ADC
+    ADC1->CR |= ADC_CR_ADEN;
+    while (!(ADC1->ISR & ADC_ISR_ADRDY));
+    ADC1->CR |= ADC_CR_ADSTART;
+}
 
+void myDAC_Init(void)
+{
+    // Disable DAC if already enabled
+    if (DAC->CR & DAC_CR_EN1)
+    {
+        DAC->CR &= ~DAC_CR_EN1;
+    }
+    
+    // Initialize output to 0
+    DAC->DHR12R1 = 0;
+    
+    // Enable DAC channel 1 with buffer off
+    DAC->CR |= DAC_CR_EN1;
+    DAC->CR |= DAC_CR_BOFF1;
+}
+
+
+void myTIM2_Init(void)
+{
+    // Enable TIM2 clock
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+    
+    // Configure TIM2
+    TIM2->CR1 = ((uint16_t)0x008C);
+    TIM2->PSC = myTIM2_PRESCALER;
+    TIM2->ARR = myTIM2_PERIOD;
+    TIM2->EGR = ((uint16_t)0x0001);
+    
+    // Enable TIM2 update interrupt
+    TIM2->DIER |= TIM_DIER_UIE;
+    NVIC_SetPriority(TIM2_IRQn, 0);
+    NVIC_EnableIRQ(TIM2_IRQn);
+}
+
+void myTIM3_Init(void)
+{
+    // Enable TIM3 clock
+    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
+    
+    // Configure TIM3 for one-shot mode (debounce)
+    TIM3->CR1 = TIM_CR1_OPM;
+    TIM3->PSC = myTIM3_PRESCALER;
+    TIM3->ARR = myTIM3_PERIOD;
+    
+    // Enable TIM3 update interrupt
+    TIM3->DIER |= TIM_DIER_UIE;
+    NVIC_SetPriority(TIM3_IRQn, 2);
+    NVIC_EnableIRQ(TIM3_IRQn);
+}
+
+void myTIM4_Init(void)
+{
+    // Enable TIM4 clock
+    RCC->APB1ENR |= RCC_APB1ENR_TIM14EN;  // Note: Using TIM14, not TIM4
+    
+    // Configure TIM14 for OLED refresh
+    TIM14->CR1 = ((uint16_t)0x008C);
+    TIM14->PSC = myTIM4_PRESCALER;
+    TIM14->ARR = myTIM4_PERIOD;
+    TIM14->EGR = ((uint16_t)0x0001);
+    
+    // Enable TIM14 update interrupt
+    TIM14->DIER |= TIM_DIER_UIE;
+    NVIC_SetPriority(TIM14_IRQn, 3);
+    NVIC_EnableIRQ(TIM14_IRQn);
+    
+    // Start timer
+    TIM14->CR1 |= TIM_CR1_CEN;
+}
+
+
+void myEXTI_Init(void)
+{
+    // EXTI0: PA0 (USER button)
+    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI0;
+    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI0_PA;
+    EXTI->IMR |= EXTI_IMR_MR0;
+    EXTI->RTSR |= EXTI_RTSR_TR0;
+    NVIC_SetPriority(EXTI0_1_IRQn, 1);
+    NVIC_EnableIRQ(EXTI0_1_IRQn);
+    
+    // EXTI2: PB2 (Function Generator)
+    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI2_PB;
+    EXTI->IMR |= EXTI_IMR_MR2;
+    EXTI->RTSR |= EXTI_RTSR_TR2;
+    NVIC_SetPriority(EXTI2_3_IRQn, 0);
+    NVIC_EnableIRQ(EXTI2_3_IRQn);
+    
+    // EXTI3: PB3 (555 Timer)
+    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PB;
+    EXTI->IMR |= EXTI_IMR_MR3;
+    EXTI->RTSR |= EXTI_RTSR_TR3;
+    // Uses same IRQ handler as EXTI2
+}
+
+
+void mySPI_Init(void)
+{
     // Enable SPI2 clock
     RCC->APB1ENR |= RCC_APB1ENR_SPI2EN;
-
+    
     // Initialize SPI2 structure
     SPI_Handle.Instance = SPI2;
     SPI_Handle.Init.Direction = SPI_DIRECTION_1LINE;
@@ -566,29 +528,33 @@ void oled_config(void)
     SPI_Handle.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
     SPI_Handle.Init.FirstBit = SPI_FIRSTBIT_MSB;
     SPI_Handle.Init.CRCPolynomial = 7;
-
+    
     HAL_SPI_Init(&SPI_Handle);
     __HAL_SPI_ENABLE(&SPI_Handle);
+}
 
-    // Reset LED Display
-    GPIOB->BRR = GPIO_PIN_11;
-    for (volatile int i = 0; i < 1000; i++); // Small delay
-    GPIOB->BSRR = GPIO_PIN_11;
-    for (volatile int i = 0; i < 1000; i++); // Small delay
 
+void oled_config(void)
+{
+    // Reset OLED display (RES# = PB11)
+    GPIOB->BRR = GPIO_PIN_11;   // Active low reset
+   
+    GPIOB->BSRR = GPIO_PIN_11;  // Release reset
+   
+    
     // Send initialization commands
     for (unsigned int i = 0; i < sizeof(oled_init_cmds); i++)
     {
         oled_Write_Cmd(oled_init_cmds[i]);
     }
-
-    // Clear display
+    
+    // Clear display memory
     for (unsigned int page = 0; page < 8; page++)
     {
         oled_Write_Cmd(0xB0 | page);
         oled_Write_Cmd(0x00);
         oled_Write_Cmd(0x10);
-
+        
         for (unsigned int col = 0; col < 128; col++)
         {
             oled_Write_Data(0x00);
@@ -596,99 +562,244 @@ void oled_config(void)
     }
 }
 
-/* EXTI0 interrupt handler (button) */
-void EXTI0_1_IRQHandler(void)
+void oled_Write_Cmd(unsigned char cmd)
 {
-    if (EXTI->PR & EXTI_PR_PR0)
+    GPIOB->BSRR = (1 << 8);   // CS# high
+    GPIOB->BRR = (1 << 9);    // D/C# low (command)
+    GPIOB->BRR = (1 << 8);    // CS# low
+    oled_Write(cmd);
+    GPIOB->BSRR = (1 << 8);   // CS# high
+}
+
+void oled_Write_Data(unsigned char data)
+{
+    GPIOB->BSRR = (1 << 8);   // CS# high
+    GPIOB->BSRR = (1 << 9);   // D/C# high (data)
+    GPIOB->BRR = (1 << 8);    // CS# low
+    oled_Write(data);
+    GPIOB->BSRR = (1 << 8);   // CS# high
+}
+
+void oled_Write(unsigned char Value)
+{
+    while ((SPI2->SR & SPI_SR_TXE) == 0);
+    HAL_SPI_Transmit(&SPI_Handle, &Value, 1, HAL_MAX_DELAY);
+    while ((SPI2->SR & SPI_SR_TXE) == 0);
+}
+
+void refresh_OLED(void)
+{
+    unsigned char Buffer[17];
+    
+    // Display resistance on PAGE 2
+    snprintf(Buffer, sizeof(Buffer), "R:%5lu Ohms", pot_resistance);
+    
+    oled_Write_Cmd(0xB2);  // Select PAGE 2
+    oled_Write_Cmd(0x02);  // Lower column
+    oled_Write_Cmd(0x10);  // Upper column
+    
+    for (int i = 0; Buffer[i] != '\0'; i++)
     {
-        EXTI->IMR &= ~EXTI_IMR_MR0;
-        EXTI->PR |= EXTI_PR_PR0;
-        TIM3->CR1 |= TIM_CR1_CEN;
+        unsigned char c = Buffer[i];
+        for (int j = 0; j < 8; j++)
+        {
+            oled_Write_Data(Characters[c][j]);
+        }
+    }
+    
+    // Display frequency on PAGE 4
+    snprintf(Buffer, sizeof(Buffer), "F:%6lu Hz", measured_frequency);
+    
+    oled_Write_Cmd(0xB4);  // Select PAGE 4
+    oled_Write_Cmd(0x02);  // Lower column
+    oled_Write_Cmd(0x10);  // Upper column
+    
+    for (int i = 0; Buffer[i] != '\0'; i++)
+    {
+        unsigned char c = Buffer[i];
+        for (int j = 0; j < 8; j++)
+        {
+            oled_Write_Data(Characters[c][j]);
+        }
+    }
+    
+    // Display source on PAGE 6
+    if (frequency_source == 0)
+    {
+        snprintf(Buffer, sizeof(Buffer), "Src: Func Gen");
+    }
+    else
+    {
+        snprintf(Buffer, sizeof(Buffer), "Src: 555 Timer");
+    }
+    
+    oled_Write_Cmd(0xB6);  // Select PAGE 6
+    oled_Write_Cmd(0x02);  // Lower column
+    oled_Write_Cmd(0x10);  // Upper column
+    
+    for (int i = 0; Buffer[i] != '\0'; i++)
+    {
+        unsigned char c = Buffer[i];
+        for (int j = 0; j < 8; j++)
+        {
+            oled_Write_Data(Characters[c][j]);
+        }
     }
 }
 
-/* EXTI2/3 interrupt handler (signals) */
-void EXTI2_3_IRQHandler(void)
-{
-    uint32_t pr = EXTI->PR & (EXTI_PR_PR2 | EXTI_PR_PR3);
-    if (pr)
-    {
-        EXTI->PR |= pr;
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
 
-        if (!timer_started)
-        {
-            TIM2->CNT = 0;
-            overflow_count = 0;
-            TIM2->CR1 |= TIM_CR1_CEN;
-            timer_started = 1;
-        }
-        else
-        {
-            TIM2->CR1 &= ~TIM_CR1_CEN;
-            uint32_t count = TIM2->CNT;
-            uint64_t total_ticks = ((uint64_t)overflow_count << 32) + count;
-            if (total_ticks > 0)
-            {
-                Freq = (unsigned int)(48000000ULL / total_ticks);
-            }
-            else
-            {
-                Freq = 0;
-            }
-            timer_started = 0;
-            display_update_flag = 1;
-        }
+void calculate_resistance(void)
+{
+    // Assuming a voltage divider: POT in series with fixed resistor
+    // V_out = V_in * (R_pot / (R_pot + R_fixed))
+    // Rearranging: R_pot = (V_out * R_fixed) / (V_in - V_out)
+    
+    // Example calculation (adjust based on your circuit):
+    // If R_fixed = 10k ohms, V_in = 3.3V
+    const uint32_t R_FIXED = 10000;  // 10k ohms
+    const uint32_t V_IN = 3300;      // 3.3V in mV
+    
+    if (pot_voltage < V_IN)
+    {
+        pot_resistance = (pot_voltage * R_FIXED) / (V_IN - pot_voltage);
+    }
+    else
+    {
+        pot_resistance = 0xFFFF;  // Max value if error
     }
 }
 
-/* TIM3 interrupt handler (debounce) */
+// ============================================================================
+// INTERRUPT HANDLERS
+// ============================================================================
+
+// TIM2 Overflow Handler
+void TIM2_IRQHandler(void)
+{
+    if ((TIM2->SR & TIM_SR_UIF) != 0)
+    {
+        trace_printf("\n*** Timer Overflow! ***\n");
+        overflow_count++;
+        TIM2->SR &= ~(TIM_SR_UIF);
+        TIM2->CR1 |= TIM_CR1_CEN;
+    }
+}
+
+// TIM3 Debounce Handler
 void TIM3_IRQHandler(void)
 {
     if ((TIM3->SR & TIM_SR_UIF) != 0)
     {
         TIM3->SR &= ~(TIM_SR_UIF);
-
+        
+        // Verify button still pressed
         if ((GPIOA->IDR & GPIO_IDR_0) != 0)
         {
-            current_source ^= 1;
-            if (current_source)
+            // Toggle frequency source
+            frequency_source ^= 1;
+            
+            // Disable current source interrupt
+            if (frequency_source == 0)
             {
-                // Switch to 555 (PB3), green LED
-                EXTI->IMR &= ~EXTI_IMR_MR2;
-                EXTI->IMR |= EXTI_IMR_MR3;
-                GPIOC->BSRR = ((uint32_t)0x0200);
-                GPIOC->BRR = ((uint32_t)0x0100);
+                EXTI->IMR &= ~EXTI_IMR_MR3;  // Disable 555
+                EXTI->IMR |= EXTI_IMR_MR2;   // Enable Func Gen
+                trace_printf("\nSwitched to Function Generator\n");
             }
             else
             {
-                // Switch to FG (PB2), blue LED
-                EXTI->IMR &= ~EXTI_IMR_MR3;
-                EXTI->IMR |= EXTI_IMR_MR2;
-                GPIOC->BSRR = ((uint32_t)0x0100);
-                GPIOC->BRR = ((uint32_t)0x0200);
+                EXTI->IMR &= ~EXTI_IMR_MR2;  // Disable Func Gen
+                EXTI->IMR |= EXTI_IMR_MR3;   // Enable 555
+                trace_printf("\nSwitched to 555 Timer\n");
             }
-            trace_printf("\nButton pressed - Switching source...\n");
-
-            // Reset frequency measurement on switch
+            
+            // Reset measurement state
+            timerTriggered = 0;
             TIM2->CR1 &= ~TIM_CR1_CEN;
-            timer_started = 0;
-            Freq = 0; // Reset frequency until new measurement
-
-            display_update_flag = 1;
         }
-
+        
+        // Re-enable USER button interrupt
         EXTI->IMR |= EXTI_IMR_MR0;
     }
 }
 
-/* TIM2 interrupt handler (overflow for frequency) */
-void TIM2_IRQHandler(void)
+// TIM14 (OLED Refresh) Handler
+void TIM14_IRQHandler(void)
 {
-    if ((TIM2->SR & TIM_SR_UIF) != 0)
+    if ((TIM14->SR & TIM_SR_UIF) != 0)
     {
-        overflow_count++;
-        TIM2->SR &= ~(TIM_SR_UIF);
+        TIM14->SR &= ~(TIM_SR_UIF);
+        oled_refresh_flag = 1;  // Set flag for main loop
     }
 }
 
-#pragma GCC diagnostic pop
+// USER Button Handler (EXTI0)
+void EXTI0_1_IRQHandler(void)
+{
+    if (EXTI->PR & EXTI_PR_PR0)
+    {
+        // Disable interrupt to prevent bounces
+        EXTI->IMR &= ~EXTI_IMR_MR0;
+        
+        // Clear flag
+        EXTI->PR |= EXTI_PR_PR0;
+        
+        // Start debounce timer
+        TIM3->CR1 |= TIM_CR1_CEN;
+    }
+}
+
+// Frequency Measurement Handler (EXTI2 and EXTI3)
+void EXTI2_3_IRQHandler(void)
+{
+    // Check which interrupt triggered
+    uint8_t is_exti2 = (EXTI->PR & EXTI_PR_PR2) != 0;
+    uint8_t is_exti3 = (EXTI->PR & EXTI_PR_PR3) != 0;
+    
+    // Only process if it matches current source
+    if ((is_exti2 && frequency_source == 0) || (is_exti3 && frequency_source == 1))
+    {
+        if (timerTriggered == 0)
+        {
+            // First edge: start timer
+            TIM2->CNT = 0x00;
+            overflow_count = 0;
+            TIM2->CR1 |= TIM_CR1_CEN;
+            timerTriggered = 1;
+        }
+        else
+        {
+            // Second edge: stop timer and calculate
+            TIM2->CR1 &= ~(TIM_CR1_CEN);
+            uint32_t count = TIM2->CNT;
+            
+            uint64_t total_ticks = ((uint64_t)overflow_count * 0xFFFFFFFF) + count;
+            
+            // Calculate period in microseconds
+            float period_us = (total_ticks / 48.0f);
+            
+            // Calculate frequency in Hz
+            if (period_us > 0)
+            {
+                measured_frequency = (uint32_t)(1000000.0f / period_us);
+                measured_period = (uint32_t)(period_us / 1000.0f);  // Convert to ms
+            }
+            else
+            {
+                measured_frequency = 0;
+                measured_period = 0;
+            }
+            
+            trace_printf("Period: %lu ms, Freq: %lu Hz\n", 
+                         measured_period, measured_frequency);
+            
+            timerTriggered = 0;
+        }
+    }
+    
+    // Clear pending flags
+    if (is_exti2) EXTI->PR |= EXTI_PR_PR2;
+    if (is_exti3) EXTI->PR |= EXTI_PR_PR3;
+}
